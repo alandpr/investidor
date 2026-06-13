@@ -475,7 +475,21 @@ async function parseNotaPDF(file) {
   for (let i=1; i<=pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    text += content.items.map(it=>it.str).join(' ') + ' ';
+    const items = content.items
+      .map(it => ({ str: it.str, x: it.transform[4], y: it.transform[5] }))
+      .filter(it => it.str.trim().length>0);
+    // reconstrói a ordem de leitura (linhas de cima p/ baixo, dentro da linha esquerda p/ direita)
+    const lines = [];
+    items.forEach(it => {
+      let line = lines.find(l => Math.abs(l.y - it.y) < 3);
+      if (!line) { line = { y: it.y, items: [] }; lines.push(line); }
+      line.items.push(it);
+    });
+    lines.sort((a,b)=>b.y-a.y);
+    lines.forEach(line => {
+      line.items.sort((a,b)=>a.x-b.x);
+      text += line.items.map(it=>it.str).join(' ') + ' ';
+    });
   }
   const dateMatch = text.match(/(\d{2}\/\d{2}\/\d{4})/);
   const codeMatch = text.match(/\b(WIN|WDO|IND|DOL|WSP|BIT)\s?[A-Z]\d{2}\b/);
