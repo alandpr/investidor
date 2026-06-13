@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InvestApp</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box}
+    body{background:#11151C;color:#ECE9E2;font-family:'Inter',sans-serif;margin:0}
+    .num{font-family:'IBM Plex Mono',monospace}
+    .display{font-family:'Fraunces',serif}
+    input,select{outline:none}
+    input:focus,select:focus{outline:2px solid #D9A85C;outline-offset:1px}
+    input::placeholder{color:#5A6373}
+    select option{background:#212935}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const C = {
+  bg:'#11151C', surface:'#1A2029', surface2:'#212935',
+  border:'#2A323F', text:'#ECE9E2', muted:'#8B95A3',
+  gold:'#D9A85C', green:'#4ADE80', red:'#F87171',
+};
+
+const fmt = v => (isNaN(v)?0:v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+
+// Firebase
+firebase.initializeApp({
+  apiKey: "AIzaSyAc-TTDlutALi2jpCVUcOKNXCpvJ4bB7SY",
+  authDomain: "investidor-5e9b2.firebaseapp.com",
+  projectId: "investidor-5e9b2",
+  storageBucket: "investidor-5e9b2.firebasestorage.app",
+  messagingSenderId: "593898501967",
+  appId: "1:593898501967:web:05643f041bc0c97c4ef73a"
+});
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+// Ícones SVG inline
+const IcoWallet = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>;
+const IcoPlus = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>;
+const IcoUpload = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;
+const IcoLogout = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>;
+const IcoCheck = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>;
+const IcoUp = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15"/></svg>;
+const IcoDown = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>;
+const IcoAlert = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0}}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
+const IcoInfo = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>;
+
+// ── Navegação inferior ──────────────────────────────────────────────────────
+function BottomNav({ page, setPage }) {
+  const btn = (id, Icon, label) => (
+    <button onClick={() => setPage(id)} style={{
+      color: page===id ? C.gold : C.muted, background:'none', border:'none', cursor:'pointer',
+      display:'flex', flexDirection:'column', alignItems:'center', gap:'2px',
+      fontSize:'11px', padding:'6px 16px'
+    }}>
+      <Icon />{label}
+    </button>
+  );
+  return (
+    <nav style={{ position:'fixed', bottom:0, left:0, right:0, display:'flex', justifyContent:'space-around', alignItems:'center', background:C.surface, borderTop:`1px solid ${C.border}`, zIndex:100, paddingBottom:'env(safe-area-inset-bottom)' }}>
+      {btn('dashboard', IcoWallet, 'Carteira')}
+      {btn('lancar', IcoPlus, 'Lançar')}
+      {btn('importar', IcoUpload, 'Importar')}
+      <button onClick={() => auth.signOut()} style={{ color:C.muted, background:'none', border:'none', cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:'2px', fontSize:'11px', padding:'6px 16px' }}>
+        <IcoLogout />Sair
+      </button>
+    </nav>
+  );
+}
+
+// ── Login ───────────────────────────────────────────────────────────────────
+function Login() {
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
+  const [modo, setModo] = useState('entrar');
+  const [erro, setErro] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const inp = { background:C.surface2, border:`1px solid ${C.border}`, color:C.text, borderRadius:'8px', padding:'10px 12px', width:'100%', fontSize:'14px' };
+  const lbl = { color:C.muted, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.08em', display:'block', marginBottom:'6px' };
+
+  const submit = async e => {
+    e.preventDefault(); setErro(null); setLoading(true);
+    try {
+      if (modo==='entrar') await auth.signInWithEmailAndPassword(email, senha);
+      else await auth.createUserWithEmailAndPassword(email, senha);
+    } catch(err) {
+      const m = {'auth/invalid-credential':'E-mail ou senha incorretos.','auth/email-already-in-use':'E-mail já cadastrado.','auth/weak-password':'Senha precisa ter ao menos 6 caracteres.','auth/invalid-email':'E-mail inválido.'};
+      setErro(m[err.code]||'Erro ao entrar. Tente novamente.');
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div style={{ background:C.bg, minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', padding:'24px' }}>
+      <div style={{ width:'100%', maxWidth:'360px' }}>
+        <div style={{ color:C.gold, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:'4px' }}>InvestApp</div>
+        <div className="display" style={{ fontSize:'28px', fontWeight:600, marginBottom:'24px' }}>{modo==='entrar'?'Entrar':'Criar conta'}</div>
+        <form onSubmit={submit} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'16px', display:'flex', flexDirection:'column', gap:'16px' }}>
+          <div><label style={lbl}>E-mail</label><input type="email" required value={email} onChange={e=>setEmail(e.target.value)} style={inp} /></div>
+          <div><label style={lbl}>Senha</label><input type="password" required minLength={6} value={senha} onChange={e=>setSenha(e.target.value)} style={inp} /></div>
+          {erro && <div style={{ background:'rgba(248,113,113,0.08)', border:`1px solid ${C.red}`, color:C.red, borderRadius:'8px', padding:'10px 12px', fontSize:'13px', display:'flex', gap:'8px', alignItems:'flex-start' }}><IcoAlert/>{erro}</div>}
+          <button type="submit" disabled={loading} style={{ background:C.gold, color:'#1A1206', border:'none', borderRadius:'10px', padding:'14px', fontWeight:600, fontSize:'14px', cursor:'pointer' }}>
+            {loading?'Aguarde...':modo==='entrar'?'Entrar':'Criar conta'}
+          </button>
+        </form>
+        <button onClick={()=>setModo(m=>m==='entrar'?'cadastrar':'entrar')} style={{ background:'none', border:'none', color:C.muted, fontSize:'13px', cursor:'pointer', width:'100%', marginTop:'16px' }}>
+          {modo==='entrar'?'Não tem conta? Criar agora':'Já tem conta? Entrar'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Dashboard ───────────────────────────────────────────────────────────────
+function calcPosicoes(ops) {
+  const sorted = [...ops].sort((a,b)=>a.data<b.data?-1:1);
+  const pos = {};
+  sorted.forEach(op => {
+    if (!pos[op.codigo]) pos[op.codigo] = {codigo:op.codigo, tipoAtivo:op.tipoAtivo, qtd:0, avg:0};
+    const p = pos[op.codigo];
+    if (op.tipo==='compra') {
+      const nq = p.qtd + op.qtd;
+      p.avg = nq>0 ? (p.qtd*p.avg + op.qtd*op.preco)/nq : 0;
+      p.qtd = nq;
+    } else { p.qtd = Math.max(0, p.qtd-op.qtd); }
+  });
+  return Object.values(pos).filter(p=>p.qtd>0);
+}
+
+function Dashboard({ user }) {
+  const [ops, setOps] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    return db.collection('usuarios').doc(user.uid).collection('operacoes')
+      .orderBy('data','asc')
+      .onSnapshot(snap => { setOps(snap.docs.map(d=>({id:d.id,...d.data()}))); setLoading(false); }, ()=>setLoading(false));
+  }, [user.uid]);
+
+  const posicoes = calcPosicoes(ops);
+  const investido = posicoes.reduce((s,p)=>s+p.qtd*p.avg, 0);
+  const s = { padding:'16px 16px 100px', maxWidth:'600px', margin:'0 auto' };
+
+  return (
+    <div style={{ background:C.bg, minHeight:'100vh' }}>
+      <div style={s}>
+        <div style={{ color:C.gold, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:'4px' }}>Carteira · Resumo</div>
+        <div className="display num" style={{ fontSize:'36px', fontWeight:600, marginBottom:'4px' }}>{fmt(investido)}</div>
+        <div style={{ color:C.muted, fontSize:'13px', marginBottom:'12px' }}>Valor investido total</div>
+
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'10px 12px', marginBottom:'24px', display:'flex', gap:'8px', fontSize:'12px', color:C.muted, alignItems:'flex-start' }}>
+          <span style={{ color:C.gold, marginTop:'1px' }}><IcoInfo/></span>
+          Cotações em tempo real e proventos serão ativados na próxima etapa (integração brapi/bolsai).
+        </div>
+
+        <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.muted, marginBottom:'12px' }}>
+          <IcoWallet/><span style={{ fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em' }}>Posições</span>
+        </div>
+
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden' }}>
+          {loading && <div style={{ padding:'32px', textAlign:'center', color:C.muted, fontSize:'14px' }}>Carregando...</div>}
+          {!loading && posicoes.length===0 && (
+            <div style={{ padding:'40px 24px', textAlign:'center', color:C.muted, fontSize:'14px', lineHeight:'1.6' }}>
+              Nenhuma posição ainda.<br/>Lance operações ou importe um extrato.
+            </div>
+          )}
+          {posicoes.map((p,i) => (
+            <div key={p.codigo} style={{ padding:'12px 16px', borderBottom:i<posicoes.length-1?`1px solid ${C.border}`:'none' }}>
+              <div style={{ marginBottom:'8px' }}>
+                <span className="num" style={{ fontWeight:600, fontSize:'14px' }}>{p.codigo}</span>
+                <span style={{ color:C.muted, fontSize:'12px', marginLeft:'8px' }}>{p.tipoAtivo}</span>
+              </div>
+              <div style={{ display:'flex', justifyContent:'space-between', borderTop:`1px solid ${C.border}`, paddingTop:'8px' }}>
+                <div><div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', marginBottom:'2px' }}>Qtd</div><div className="num" style={{ fontSize:'13px' }}>{p.qtd}</div></div>
+                <div style={{ textAlign:'center' }}><div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', marginBottom:'2px' }}>Preço médio</div><div className="num" style={{ fontSize:'13px' }}>{fmt(p.avg)}</div></div>
+                <div style={{ textAlign:'right' }}><div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', marginBottom:'2px' }}>Total</div><div className="num" style={{ fontSize:'13px' }}>{fmt(p.qtd*p.avg)}</div></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Lançar Operação ─────────────────────────────────────────────────────────
+function LancarOperacao({ user }) {
+  const [tipo, setTipo] = useState('compra');
+  const [ticker, setTicker] = useState('');
+  const [tipoAtivo, setTipoAtivo] = useState('Ação');
+  const [data, setData] = useState(new Date().toISOString().slice(0,10));
+  const [qtd, setQtd] = useState('');
+  const [preco, setPreco] = useState('');
+  const [taxas, setTaxas] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const qtdN = parseFloat(qtd)||0;
+  const precoN = parseFloat(String(preco).replace(',','.'))||0;
+  const taxasN = parseFloat(String(taxas).replace(',','.'))||0;
+  const bruto = qtdN * precoN;
+  const total = tipo==='compra' ? bruto+taxasN : bruto-taxasN;
+  const valid = ticker.trim().length>=4 && qtdN>0 && precoN>0 && data;
+
+  const inp = { background:C.surface2, border:`1px solid ${C.border}`, color:C.text, borderRadius:'8px', padding:'10px 12px', width:'100%', fontSize:'14px', fontFamily:"'IBM Plex Mono',monospace" };
+  const lbl = { color:C.muted, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.08em', display:'block', marginBottom:'6px' };
+
+  const submit = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try {
+      await db.collection('usuarios').doc(user.uid).collection('operacoes').add({
+        tipo, codigo:ticker.trim().toUpperCase(), tipoAtivo, data,
+        qtd:qtdN, preco:precoN, taxas:taxasN, total,
+        criadoEm: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      setSaved(true); setTicker(''); setQtd(''); setPreco(''); setTaxas('');
+      setTimeout(()=>setSaved(false), 2000);
+    } finally { setSaving(false); }
+  };
+
+  const btnTipo = (t, label) => (
+    <button onClick={()=>setTipo(t)} style={{
+      flex:1, border:`1px solid ${tipo===t?(t==='compra'?C.green:C.red):C.border}`,
+      background:tipo===t?(t==='compra'?'rgba(74,222,128,0.08)':'rgba(248,113,113,0.08)'):C.surface,
+      color:tipo===t?(t==='compra'?C.green:C.red):C.muted,
+      borderRadius:'10px', padding:'12px', fontSize:'14px', fontWeight:500, cursor:'pointer'
+    }}>{label}</button>
+  );
+
+  return (
+    <div style={{ background:C.bg, minHeight:'100vh', padding:'16px 16px 100px' }}>
+      <div style={{ maxWidth:'480px', margin:'0 auto' }}>
+        <div style={{ color:C.gold, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:'4px' }}>Nota de corretagem</div>
+        <div className="display" style={{ fontSize:'26px', fontWeight:600, marginBottom:'24px' }}>Lançar operação</div>
+
+        <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
+          {btnTipo('compra','↓  Compra')}{btnTipo('venda','↑  Venda')}
+        </div>
+
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'16px', display:'flex', flexDirection:'column', gap:'16px' }}>
+          <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:'8px' }}>
+            <div>
+              <label style={lbl}>Ticker</label>
+              <input value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} placeholder="PETR4" maxLength={6} style={inp} />
+            </div>
+            <div>
+              <label style={lbl}>Tipo</label>
+              <select value={tipoAtivo} onChange={e=>setTipoAtivo(e.target.value)} style={{ ...inp, fontFamily:'Inter,sans-serif' }}>
+                <option>Ação</option><option>FII</option><option>ETF</option><option>BDR</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label style={lbl}>Data do pregão</label>
+            <input type="date" value={data} onChange={e=>setData(e.target.value)} style={inp} />
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
+            <div><label style={lbl}>Quantidade</label><input type="number" inputMode="numeric" value={qtd} onChange={e=>setQtd(e.target.value)} placeholder="0" style={inp} /></div>
+            <div><label style={lbl}>Preço unitário</label><input inputMode="decimal" value={preco} onChange={e=>setPreco(e.target.value)} placeholder="0,00" style={inp} /></div>
+          </div>
+
+          <div><label style={lbl}>Taxas e corretagem</label><input inputMode="decimal" value={taxas} onChange={e=>setTaxas(e.target.value)} placeholder="0,00" style={inp} /></div>
+
+          <div style={{ background:C.surface2, border:`1px solid ${C.border}`, borderRadius:'8px', padding:'12px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', fontSize:'13px', marginBottom:'6px' }}>
+              <span style={{ color:C.muted }}>Valor bruto</span><span className="num">{fmt(bruto)}</span>
+            </div>
+            <div style={{ display:'flex', justifyContent:'space-between', fontSize:'13px', marginBottom:'8px' }}>
+              <span style={{ color:C.muted }}>{tipo==='compra'?'+ Taxas':'− Taxas'}</span><span className="num">{fmt(taxasN)}</span>
+            </div>
+            <div style={{ display:'flex', justifyContent:'space-between', fontSize:'14px', fontWeight:600, borderTop:`1px solid ${C.border}`, paddingTop:'8px' }}>
+              <span>Total {tipo==='compra'?'pago':'recebido'}</span>
+              <span className="num" style={{ color:C.gold }}>{fmt(total)}</span>
+            </div>
+          </div>
+        </div>
+
+        <button onClick={submit} disabled={!valid||saving} style={{ width:'100%', marginTop:'20px', borderRadius:'10px', padding:'14px', background:valid?C.gold:C.surface2, color:valid?'#1A1206':C.muted, border:'none', fontSize:'14px', fontWeight:600, cursor:valid?'pointer':'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
+          {saved?<><IcoCheck/> Operação lançada</>:saving?'Salvando...':'Lançar operação'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Importar Extrato ────────────────────────────────────────────────────────
+const parseNum = v => typeof v==='number'?v:parseFloat(String(v||0).replace(',','.'));
+const toISO = s => { const [d,m,y]=s.split('/'); return `${y}-${m}-${d}`; };
+const parseDataStr = s => { const [d,m,y]=s.split('/'); return new Date(`${y}-${m}-${d}`); };
+const mapTipo = c => /11$/.test(c)?'FII':'Ação';
+
+function ImportarExtrato({ user }) {
+  const [linhas, setLinhas] = useState(null);
+  const [erro, setErro] = useState(null);
+  const [expandMes, setExpandMes] = useState(null);
+  const [savingC, setSavingC] = useState(false); const [savedC, setSavedC] = useState(false);
+  const [savingD, setSavingD] = useState(false); const [savedD, setSavedD] = useState(false);
+
+  const handleFile = file => {
+    setErro(null);
+    const r = new FileReader();
+    r.onload = e => {
+      try {
+        const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'});
+        const ws = wb.Sheets[wb.SheetNames.find(n=>/negocia/i.test(n))||wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(ws, {defval:''});
+        setLinhas(json.filter(r=>r['Data do Negócio']).map(r=>({
+          data:r['Data do Negócio'], tipo:r['Tipo de Movimentação'],
+          mercado:r['Mercado'], codigo:r['Código de Negociação'],
+          qtd:parseNum(r['Quantidade']), preco:parseNum(r['Preço']), valor:parseNum(r['Valor'])
+        })));
+        setSavedC(false); setSavedD(false);
+      } catch { setErro('Não foi possível ler o arquivo. Use o extrato .xlsx do Canal Eletrônico do Investidor (B3).'); }
+    };
+    r.readAsArrayBuffer(file);
+  };
+
+  if (!linhas) return (
+    <div style={{ background:C.bg, minHeight:'100vh', padding:'16px 16px 100px' }}>
+      <div style={{ maxWidth:'480px', margin:'0 auto' }}>
+        <div style={{ color:C.gold, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:'4px' }}>Importação</div>
+        <div className="display" style={{ fontSize:'26px', fontWeight:600, marginBottom:'24px' }}>Extrato B3</div>
+        <label style={{ display:'block', background:C.surface, border:`2px dashed ${C.border}`, borderRadius:'12px', padding:'48px 24px', textAlign:'center', cursor:'pointer' }}>
+          <input type="file" accept=".xlsx,.xls,.csv" style={{ display:'none' }} onChange={e=>e.target.files?.[0]&&handleFile(e.target.files[0])} />
+          <div style={{ fontSize:'36px', marginBottom:'12px' }}>📂</div>
+          <div style={{ fontSize:'14px', fontWeight:500, marginBottom:'4px' }}>Toque para selecionar o arquivo</div>
+          <div style={{ fontSize:'12px', color:C.muted }}>.xlsx do Canal Eletrônico do Investidor (B3)</div>
+        </label>
+        {erro && <div style={{ marginTop:'16px', background:'rgba(248,113,113,0.08)', border:`1px solid ${C.red}`, color:C.red, borderRadius:'8px', padding:'10px 12px', fontSize:'13px', display:'flex', gap:'8px', alignItems:'flex-start' }}><IcoAlert/>{erro}</div>}
+      </div>
+    </div>
+  );
+
+  const carteira = linhas.filter(l=>l.mercado!=='Futuro');
+  const futuros = linhas.filter(l=>l.mercado==='Futuro');
+  const grupos = {};
+  futuros.forEach(l=>{
+    const k=`${l.data}__${l.codigo}`;
+    if(!grupos[k]) grupos[k]={data:l.data,codigo:l.codigo,compra:0,venda:0};
+    if(l.tipo==='Compra') grupos[k].compra+=l.valor; else grupos[k].venda+=l.valor;
+  });
+  const meses = {};
+  Object.values(grupos).forEach(g=>{
+    const dt=parseDataStr(g.data);
+    const mk=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
+    if(!meses[mk]) meses[mk]={dias:[],resultado:0};
+    const res=g.venda-g.compra;
+    meses[mk].dias.push({...g,resultado:res}); meses[mk].resultado+=res;
+  });
+  const mesesOrdenados=Object.entries(meses).sort((a,b)=>a[0]<b[0]?1:-1);
+  const nMs=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+  const nomeMes=k=>{const[y,m]=k.split('-');return `${nMs[parseInt(m)-1]}/${y}`;};
+
+  const salvarCarteira = async () => {
+    setSavingC(true);
+    try {
+      const batch=db.batch();
+      carteira.forEach(l=>{
+        const ref=db.collection('usuarios').doc(user.uid).collection('operacoes').doc();
+        batch.set(ref,{tipo:l.tipo==='Compra'?'compra':'venda',codigo:l.codigo,tipoAtivo:mapTipo(l.codigo),data:toISO(l.data),qtd:l.qtd,preco:l.preco,taxas:0,total:l.valor,origem:'b3',criadoEm:firebase.firestore.FieldValue.serverTimestamp()});
+      });
+      await batch.commit(); setSavedC(true);
+    } finally { setSavingC(false); }
+  };
+
+  const salvarDT = async () => {
+    setSavingD(true);
+    try {
+      const batch=db.batch();
+      mesesOrdenados.forEach(([mk,info])=>{
+        const lucro=info.resultado>0;
+        const ref=db.collection('usuarios').doc(user.uid).collection('daytrade_mensal').doc(mk);
+        batch.set(ref,{mes:mk,resultado:info.resultado,darfEstimado:lucro?Math.round(info.resultado*0.2*100)/100:0,dias:info.dias.map(d=>({data:d.data,codigo:d.codigo,resultado:d.resultado})),atualizadoEm:firebase.firestore.FieldValue.serverTimestamp()});
+      });
+      await batch.commit(); setSavedD(true);
+    } finally { setSavingD(false); }
+  };
+
+  return (
+    <div style={{ background:C.bg, minHeight:'100vh', padding:'16px 16px 100px' }}>
+      <div style={{ maxWidth:'480px', margin:'0 auto' }}>
+        <div style={{ color:C.gold, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:'4px' }}>Importação</div>
+        <div className="display" style={{ fontSize:'26px', fontWeight:600, marginBottom:'4px' }}>Extrato processado</div>
+        <div style={{ color:C.muted, fontSize:'13px', marginBottom:'24px' }}>{linhas.length} lançamentos encontrados</div>
+
+        <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.muted, marginBottom:'12px' }}>
+          <IcoWallet/><span style={{ fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em' }}>Carteira · {carteira.length} operações</span>
+        </div>
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden', marginBottom:'12px' }}>
+          {carteira.length===0
+            ? <div style={{ padding:'20px', textAlign:'center', color:C.muted, fontSize:'13px' }}>Nenhuma operação de carteira</div>
+            : carteira.map((l,i)=>(
+              <div key={i} style={{ padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:i<carteira.length-1?`1px solid ${C.border}`:'none' }}>
+                <div>
+                  <span className="num" style={{ fontWeight:600, fontSize:'13px' }}>{l.codigo}</span>
+                  <span style={{ color:C.muted, fontSize:'12px', marginLeft:'8px' }}>{l.data} · {l.qtd}x {fmt(l.preco)}</span>
+                </div>
+                <span className="num" style={{ fontSize:'12px', fontWeight:600, color:l.tipo==='Compra'?C.green:C.red }}>{l.tipo==='Compra'?'−':'+'}  {fmt(l.valor)}</span>
+              </div>
+            ))
+          }
+        </div>
+        {carteira.length>0 && (
+          <button onClick={salvarCarteira} disabled={savingC||savedC} style={{ width:'100%', marginBottom:'24px', borderRadius:'10px', padding:'12px', background:savedC?C.surface2:C.gold, color:savedC?C.green:'#1A1206', border:'none', fontSize:'14px', fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
+            {savedC?<><IcoCheck/> Operações salvas na carteira</>:savingC?'Salvando...':`Salvar ${carteira.length} operações na carteira`}
+          </button>
+        )}
+
+        <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.muted, marginBottom:'12px' }}>
+          <span>📈</span><span style={{ fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em' }}>Day Trade · Mini Índice</span>
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:'12px', marginBottom:'12px' }}>
+          {mesesOrdenados.length===0
+            ? <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'20px', textAlign:'center', color:C.muted, fontSize:'13px' }}>Nenhuma operação de day trade</div>
+            : mesesOrdenados.map(([mk,info])=>{
+              const lucro=info.resultado>0;
+              const darf=lucro?info.resultado*0.2:0;
+              const gera=darf>=10;
+              const open=expandMes===mk;
+              return (
+                <div key={mk} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden' }}>
+                  <button onClick={()=>setExpandMes(open?null:mk)} style={{ width:'100%', padding:'12px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', background:'none', border:'none', cursor:'pointer', color:C.text }}>
+                    <div style={{ textAlign:'left' }}>
+                      <div style={{ fontSize:'14px', fontWeight:500 }}>{nomeMes(mk)}</div>
+                      <div style={{ fontSize:'12px', color:C.muted }}>{info.dias.length} pregão(ões)</div>
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                      <span className="num" style={{ fontWeight:600, color:lucro?C.green:C.red }}>{lucro?'+':''}{fmt(info.resultado)}</span>
+                      {open?<IcoUp/>:<IcoDown/>}
+                    </div>
+                  </button>
+                  {open && (
+                    <div style={{ borderTop:`1px solid ${C.border}` }}>
+                      {info.dias.map((d,i)=>(
+                        <div key={i} style={{ padding:'8px 16px', display:'flex', justifyContent:'space-between', fontSize:'12px', borderBottom:`1px solid ${C.border}`, color:C.muted }}>
+                          <span className="num">{d.data} · {d.codigo}</span>
+                          <span className="num" style={{ color:d.resultado>=0?C.green:C.red }}>{fmt(d.resultado)}</span>
+                        </div>
+                      ))}
+                      <div style={{ background:C.surface2, padding:'12px 16px' }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:'12px', marginBottom:'6px', color:C.muted }}>
+                          <span>Alíquota (20% sobre lucro)</span><span className="num">{fmt(darf)}</span>
+                        </div>
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:'13px', fontWeight:600 }}>
+                          <span style={{ color:C.gold }}>{gera?'DARF estimado (cód. 6015)':'Sem DARF'}</span>
+                          <span className="num" style={{ color:C.gold }}>{gera?fmt(darf):'—'}</span>
+                        </div>
+                        {!gera && <div style={{ fontSize:'11px', color:C.muted, marginTop:'4px' }}>{lucro?'Valor abaixo de R$10':'Prejuízo compensável em meses futuros'}</div>}
+                        <div style={{ fontSize:'11px', color:C.muted, marginTop:'6px' }}>* IRRF retido na fonte: conferir na nota de corretagem.</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          }
+        </div>
+        {mesesOrdenados.length>0 && (
+          <button onClick={salvarDT} disabled={savingD||savedD} style={{ width:'100%', marginBottom:'12px', borderRadius:'10px', padding:'12px', background:savedD?C.surface2:C.gold, color:savedD?C.green:'#1A1206', border:'none', fontSize:'14px', fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
+            {savedD?<><IcoCheck/> Resultados salvos</>:savingD?'Salvando...':'Salvar resultados de day trade'}
+          </button>
+        )}
+        <button onClick={()=>{setLinhas(null);setExpandMes(null);}} style={{ width:'100%', borderRadius:'10px', padding:'12px', background:'none', border:`1px solid ${C.border}`, color:C.muted, fontSize:'14px', cursor:'pointer' }}>
+          Importar outro arquivo
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── App Root ────────────────────────────────────────────────────────────────
+function App() {
+  const [user, setUser] = useState(undefined);
+  const [page, setPage] = useState('dashboard');
+  useEffect(() => auth.onAuthStateChanged(u=>setUser(u)), []);
+  if (user===undefined) return <div style={{ background:C.bg, minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', color:C.muted, fontSize:'14px' }}>Carregando...</div>;
+  if (!user) return <Login />;
+  return (
+    <div>
+      {page==='dashboard' && <Dashboard user={user} />}
+      {page==='lancar' && <LancarOperacao user={user} />}
+      {page==='importar' && <ImportarExtrato user={user} />}
+      <BottomNav page={page} setPage={setPage} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
