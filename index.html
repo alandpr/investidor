@@ -12,6 +12,7 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     *{box-sizing:border-box}
@@ -36,6 +37,8 @@ const C = {
 };
 
 const fmt = v => (isNaN(v)?0:v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 // Firebase
 firebase.initializeApp({
@@ -306,13 +309,26 @@ const parseNum = v => typeof v==='number'?v:parseFloat(String(v||0).replace(',',
 const toISO = s => { const [d,m,y]=s.split('/'); return `${y}-${m}-${d}`; };
 const parseDataStr = s => { const [d,m,y]=s.split('/'); return new Date(`${y}-${m}-${d}`); };
 const mapTipo = c => /11$/.test(c)?'FII':'Ação';
+const nMs=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+const nomeMes=k=>{const[y,m]=k.split('-');return `${nMs[parseInt(m)-1]}/${y}`;};
 
-function ImportarExtrato({ user }) {
+function TabBtn({active, onClick, children}) {
+  return (
+    <button onClick={onClick} style={{
+      flex:1, padding:'10px', borderRadius:'8px', border:'none', cursor:'pointer',
+      fontSize:'12px', fontWeight:600,
+      background: active?C.gold:C.surface,
+      color: active?'#1A1206':C.muted
+    }}>{children}</button>
+  );
+}
+
+// ── Sub-aba: Extrato B3 (XLSX) ──────────────────────────────────────────────
+function TabExtratoXLSX({ user }) {
   const [linhas, setLinhas] = useState(null);
   const [erro, setErro] = useState(null);
   const [expandMes, setExpandMes] = useState(null);
   const [savingC, setSavingC] = useState(false); const [savedC, setSavedC] = useState(false);
-  const [savingD, setSavingD] = useState(false); const [savedD, setSavedD] = useState(false);
 
   const handleFile = file => {
     setErro(null);
@@ -327,25 +343,21 @@ function ImportarExtrato({ user }) {
           mercado:r['Mercado'], codigo:r['Código de Negociação'],
           qtd:parseNum(r['Quantidade']), preco:parseNum(r['Preço']), valor:parseNum(r['Valor'])
         })));
-        setSavedC(false); setSavedD(false);
+        setSavedC(false);
       } catch { setErro('Não foi possível ler o arquivo. Use o extrato .xlsx do Canal Eletrônico do Investidor (B3).'); }
     };
     r.readAsArrayBuffer(file);
   };
 
   if (!linhas) return (
-    <div style={{ background:C.bg, minHeight:'100vh', padding:'16px 16px 100px' }}>
-      <div style={{ maxWidth:'480px', margin:'0 auto' }}>
-        <div style={{ color:C.gold, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:'4px' }}>Importação</div>
-        <div className="display" style={{ fontSize:'26px', fontWeight:600, marginBottom:'24px' }}>Extrato B3</div>
-        <label style={{ display:'block', background:C.surface, border:`2px dashed ${C.border}`, borderRadius:'12px', padding:'48px 24px', textAlign:'center', cursor:'pointer' }}>
-          <input type="file" accept=".xlsx,.xls,.csv" style={{ display:'none' }} onChange={e=>e.target.files?.[0]&&handleFile(e.target.files[0])} />
-          <div style={{ fontSize:'36px', marginBottom:'12px' }}>📂</div>
-          <div style={{ fontSize:'14px', fontWeight:500, marginBottom:'4px' }}>Toque para selecionar o arquivo</div>
-          <div style={{ fontSize:'12px', color:C.muted }}>.xlsx do Canal Eletrônico do Investidor (B3)</div>
-        </label>
-        {erro && <div style={{ marginTop:'16px', background:'rgba(248,113,113,0.08)', border:`1px solid ${C.red}`, color:C.red, borderRadius:'8px', padding:'10px 12px', fontSize:'13px', display:'flex', gap:'8px', alignItems:'flex-start' }}><IcoAlert/>{erro}</div>}
-      </div>
+    <div>
+      <label style={{ display:'block', background:C.surface, border:`2px dashed ${C.border}`, borderRadius:'12px', padding:'48px 24px', textAlign:'center', cursor:'pointer' }}>
+        <input type="file" accept=".xlsx,.xls,.csv" style={{ display:'none' }} onChange={e=>e.target.files?.[0]&&handleFile(e.target.files[0])} />
+        <div style={{ fontSize:'36px', marginBottom:'12px' }}>📂</div>
+        <div style={{ fontSize:'14px', fontWeight:500, marginBottom:'4px' }}>Toque para selecionar o arquivo</div>
+        <div style={{ fontSize:'12px', color:C.muted }}>.xlsx do Canal Eletrônico do Investidor (B3)</div>
+      </label>
+      {erro && <div style={{ marginTop:'16px', background:'rgba(248,113,113,0.08)', border:`1px solid ${C.red}`, color:C.red, borderRadius:'8px', padding:'10px 12px', fontSize:'13px', display:'flex', gap:'8px', alignItems:'flex-start' }}><IcoAlert/>{erro}</div>}
     </div>
   );
 
@@ -366,8 +378,6 @@ function ImportarExtrato({ user }) {
     meses[mk].dias.push({...g,resultado:res}); meses[mk].resultado+=res;
   });
   const mesesOrdenados=Object.entries(meses).sort((a,b)=>a[0]<b[0]?1:-1);
-  const nMs=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
-  const nomeMes=k=>{const[y,m]=k.split('-');return `${nMs[parseInt(m)-1]}/${y}`;};
 
   const salvarCarteira = async () => {
     setSavingC(true);
@@ -381,59 +391,45 @@ function ImportarExtrato({ user }) {
     } finally { setSavingC(false); }
   };
 
-  const salvarDT = async () => {
-    setSavingD(true);
-    try {
-      const batch=db.batch();
-      mesesOrdenados.forEach(([mk,info])=>{
-        const lucro=info.resultado>0;
-        const ref=db.collection('usuarios').doc(user.uid).collection('daytrade_mensal').doc(mk);
-        batch.set(ref,{mes:mk,resultado:info.resultado,darfEstimado:lucro?Math.round(info.resultado*0.2*100)/100:0,dias:info.dias.map(d=>({data:d.data,codigo:d.codigo,resultado:d.resultado})),atualizadoEm:firebase.firestore.FieldValue.serverTimestamp()});
-      });
-      await batch.commit(); setSavedD(true);
-    } finally { setSavingD(false); }
-  };
-
   return (
-    <div style={{ background:C.bg, minHeight:'100vh', padding:'16px 16px 100px' }}>
-      <div style={{ maxWidth:'480px', margin:'0 auto' }}>
-        <div style={{ color:C.gold, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:'4px' }}>Importação</div>
-        <div className="display" style={{ fontSize:'26px', fontWeight:600, marginBottom:'4px' }}>Extrato processado</div>
-        <div style={{ color:C.muted, fontSize:'13px', marginBottom:'24px' }}>{linhas.length} lançamentos encontrados</div>
+    <div>
+      <div style={{ color:C.muted, fontSize:'13px', marginBottom:'16px' }}>{linhas.length} lançamentos encontrados</div>
 
-        <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.muted, marginBottom:'12px' }}>
-          <IcoWallet/><span style={{ fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em' }}>Carteira · {carteira.length} operações</span>
-        </div>
-        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden', marginBottom:'12px' }}>
-          {carteira.length===0
-            ? <div style={{ padding:'20px', textAlign:'center', color:C.muted, fontSize:'13px' }}>Nenhuma operação de carteira</div>
-            : carteira.map((l,i)=>(
-              <div key={i} style={{ padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:i<carteira.length-1?`1px solid ${C.border}`:'none' }}>
-                <div>
-                  <span className="num" style={{ fontWeight:600, fontSize:'13px' }}>{l.codigo}</span>
-                  <span style={{ color:C.muted, fontSize:'12px', marginLeft:'8px' }}>{l.data} · {l.qtd}x {fmt(l.preco)}</span>
-                </div>
-                <span className="num" style={{ fontSize:'12px', fontWeight:600, color:l.tipo==='Compra'?C.green:C.red }}>{l.tipo==='Compra'?'−':'+'}  {fmt(l.valor)}</span>
+      <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.muted, marginBottom:'12px' }}>
+        <IcoWallet/><span style={{ fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em' }}>Carteira · {carteira.length} operações</span>
+      </div>
+      <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden', marginBottom:'12px' }}>
+        {carteira.length===0
+          ? <div style={{ padding:'20px', textAlign:'center', color:C.muted, fontSize:'13px' }}>Nenhuma operação de carteira</div>
+          : carteira.map((l,i)=>(
+            <div key={i} style={{ padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:i<carteira.length-1?`1px solid ${C.border}`:'none' }}>
+              <div>
+                <span className="num" style={{ fontWeight:600, fontSize:'13px' }}>{l.codigo}</span>
+                <span style={{ color:C.muted, fontSize:'12px', marginLeft:'8px' }}>{l.data} · {l.qtd}x {fmt(l.preco)}</span>
               </div>
-            ))
-          }
-        </div>
-        {carteira.length>0 && (
-          <button onClick={salvarCarteira} disabled={savingC||savedC} style={{ width:'100%', marginBottom:'24px', borderRadius:'10px', padding:'12px', background:savedC?C.surface2:C.gold, color:savedC?C.green:'#1A1206', border:'none', fontSize:'14px', fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
-            {savedC?<><IcoCheck/> Operações salvas na carteira</>:savingC?'Salvando...':`Salvar ${carteira.length} operações na carteira`}
-          </button>
-        )}
+              <span className="num" style={{ fontSize:'12px', fontWeight:600, color:l.tipo==='Compra'?C.green:C.red }}>{l.tipo==='Compra'?'−':'+'}  {fmt(l.valor)}</span>
+            </div>
+          ))
+        }
+      </div>
+      {carteira.length>0 && (
+        <button onClick={salvarCarteira} disabled={savingC||savedC} style={{ width:'100%', marginBottom:'24px', borderRadius:'10px', padding:'12px', background:savedC?C.surface2:C.gold, color:savedC?C.green:'#1A1206', border:'none', fontSize:'14px', fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
+          {savedC?<><IcoCheck/> Operações salvas na carteira</>:savingC?'Salvando...':`Salvar ${carteira.length} operações na carteira`}
+        </button>
+      )}
 
-        <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.muted, marginBottom:'12px' }}>
-          <span>📈</span><span style={{ fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em' }}>Day Trade · Mini Índice</span>
-        </div>
-        <div style={{ display:'flex', flexDirection:'column', gap:'12px', marginBottom:'12px' }}>
-          {mesesOrdenados.length===0
-            ? <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'20px', textAlign:'center', color:C.muted, fontSize:'13px' }}>Nenhuma operação de day trade</div>
-            : mesesOrdenados.map(([mk,info])=>{
+      {futuros.length>0 && (
+        <React.Fragment>
+          <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.muted, marginBottom:'12px' }}>
+            <span>📈</span><span style={{ fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em' }}>Day Trade · Mini Índice (estimativa, sem taxas)</span>
+          </div>
+          <div style={{ background:'rgba(217,168,92,0.08)', border:`1px solid ${C.gold}`, borderRadius:'10px', padding:'10px 12px', marginBottom:'12px', fontSize:'12px', color:C.muted, display:'flex', gap:'8px', alignItems:'flex-start' }}>
+            <span style={{ color:C.gold, marginTop:'1px' }}><IcoInfo/></span>
+            Esse valor não inclui taxas/corretagem. Para o cálculo oficial do DARF, use a aba "Notas PDF" com as notas de corretagem.
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:'12px', marginBottom:'8px' }}>
+            {mesesOrdenados.map(([mk,info])=>{
               const lucro=info.resultado>0;
-              const darf=lucro?info.resultado*0.2:0;
-              const gera=darf>=10;
               const open=expandMes===mk;
               return (
                 <div key={mk} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden' }}>
@@ -455,36 +451,243 @@ function ImportarExtrato({ user }) {
                           <span className="num" style={{ color:d.resultado>=0?C.green:C.red }}>{fmt(d.resultado)}</span>
                         </div>
                       ))}
-                      <div style={{ background:C.surface2, padding:'12px 16px' }}>
-                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:'12px', marginBottom:'6px', color:C.muted }}>
-                          <span>Alíquota (20% sobre lucro)</span><span className="num">{fmt(darf)}</span>
-                        </div>
-                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:'13px', fontWeight:600 }}>
-                          <span style={{ color:C.gold }}>{gera?'DARF estimado (cód. 6015)':'Sem DARF'}</span>
-                          <span className="num" style={{ color:C.gold }}>{gera?fmt(darf):'—'}</span>
-                        </div>
-                        {!gera && <div style={{ fontSize:'11px', color:C.muted, marginTop:'4px' }}>{lucro?'Valor abaixo de R$10':'Prejuízo compensável em meses futuros'}</div>}
-                        <div style={{ fontSize:'11px', color:C.muted, marginTop:'6px' }}>* IRRF retido na fonte: conferir na nota de corretagem.</div>
-                      </div>
                     </div>
                   )}
                 </div>
               );
-            })
-          }
-        </div>
-        {mesesOrdenados.length>0 && (
-          <button onClick={salvarDT} disabled={savingD||savedD} style={{ width:'100%', marginBottom:'12px', borderRadius:'10px', padding:'12px', background:savedD?C.surface2:C.gold, color:savedD?C.green:'#1A1206', border:'none', fontSize:'14px', fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
-            {savedD?<><IcoCheck/> Resultados salvos</>:savingD?'Salvando...':'Salvar resultados de day trade'}
+            })}
+          </div>
+        </React.Fragment>
+      )}
+
+      <button onClick={()=>{setLinhas(null);setExpandMes(null);}} style={{ width:'100%', marginTop:'8px', borderRadius:'10px', padding:'12px', background:'none', border:`1px solid ${C.border}`, color:C.muted, fontSize:'14px', cursor:'pointer' }}>
+        Importar outro arquivo
+      </button>
+    </div>
+  );
+}
+
+// ── Leitura de notas de corretagem em PDF ───────────────────────────────────
+async function parseNotaPDF(file) {
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  let text = '';
+  for (let i=1; i<=pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(it=>it.str).join(' ') + ' ';
+  }
+  const dateMatch = text.match(/(\d{2}\/\d{2}\/\d{4})/);
+  const codeMatch = text.match(/\b(WIN|WDO|IND|DOL|WSP|BIT)\s?[A-Z]\d{2}\b/);
+  const valueMatches = [...text.matchAll(/(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])\b/g)];
+  let resultado = 0;
+  if (valueMatches.length) {
+    const last = valueMatches[valueMatches.length-1];
+    const val = parseFloat(last[1].replace(/\./g,'').replace(',','.'));
+    resultado = last[2]==='D' ? -val : val;
+  }
+  return {
+    data: dateMatch ? dateMatch[1] : '',
+    codigo: codeMatch ? codeMatch[0].replace(/\s+/g,' ') : '',
+    resultado,
+  };
+}
+
+// ── Sub-aba: Notas de corretagem (PDF) ──────────────────────────────────────
+function TabNotasPDF({ user }) {
+  const [itens, setItens] = useState([]);
+  const [lendo, setLendo] = useState(false);
+  const [erro, setErro] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const handleFiles = async files => {
+    setErro(null); setLendo(true); setSaved(false);
+    try {
+      const novos = [];
+      for (const f of files) {
+        try {
+          const parsed = await parseNotaPDF(f);
+          novos.push({ nome:f.name, ...parsed });
+        } catch {
+          novos.push({ nome:f.name, data:'', codigo:'', resultado:0 });
+        }
+      }
+      setItens(prev=>[...prev, ...novos]);
+    } catch {
+      setErro('Não foi possível ler um ou mais arquivos. Confira se são PDFs válidos.');
+    } finally { setLendo(false); }
+  };
+
+  const updateItem = (i, field, val) => setItens(prev => prev.map((it,idx)=> idx===i?{...it,[field]:val}:it));
+  const removeItem = i => setItens(prev=>prev.filter((_,idx)=>idx!==i));
+
+  const salvar = async () => {
+    setSaving(true);
+    try {
+      const batch = db.batch();
+      itens.forEach(it=>{
+        if (!it.data) return;
+        const iso = toISO(it.data);
+        const ref = db.collection('usuarios').doc(user.uid).collection('daytrade_pregoes').doc(iso);
+        batch.set(ref, { data: it.data, codigo: it.codigo, resultado: parseFloat(String(it.resultado).replace(',','.'))||0, fonte:'pdf', criadoEm: firebase.firestore.FieldValue.serverTimestamp() });
+      });
+      await batch.commit();
+      setSaved(true); setItens([]);
+    } finally { setSaving(false); }
+  };
+
+  const inpStyle = { background:C.surface2, border:`1px solid ${C.border}`, color:C.text, borderRadius:'6px', padding:'6px 8px', fontSize:'12px', fontFamily:"'IBM Plex Mono',monospace", width:'100%' };
+
+  return (
+    <div>
+      <label style={{ display:'block', background:C.surface, border:`2px dashed ${C.border}`, borderRadius:'12px', padding:'32px 24px', textAlign:'center', cursor:'pointer', marginBottom:'16px' }}>
+        <input type="file" accept="application/pdf" multiple style={{ display:'none' }} onChange={e=>e.target.files?.length && handleFiles(Array.from(e.target.files))} />
+        <div style={{ fontSize:'36px', marginBottom:'12px' }}>📄</div>
+        <div style={{ fontSize:'14px', fontWeight:500, marginBottom:'4px' }}>Toque para selecionar 1 ou mais PDFs</div>
+        <div style={{ fontSize:'12px', color:C.muted }}>Notas de corretagem com operações de day trade (Mini Índice)</div>
+      </label>
+
+      {lendo && <div style={{ textAlign:'center', color:C.muted, fontSize:'13px', marginBottom:'12px' }}>Lendo arquivos...</div>}
+      {erro && <div style={{ marginBottom:'16px', background:'rgba(248,113,113,0.08)', border:`1px solid ${C.red}`, color:C.red, borderRadius:'8px', padding:'10px 12px', fontSize:'13px', display:'flex', gap:'8px', alignItems:'flex-start' }}><IcoAlert/>{erro}</div>}
+
+      {itens.length>0 && (
+        <React.Fragment>
+          <div style={{ color:C.muted, fontSize:'12px', marginBottom:'8px' }}>Confira os dados extraídos antes de salvar:</div>
+          <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'16px' }}>
+            {itens.map((it,i)=>(
+              <div key={i} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px' }}>
+                <div style={{ fontSize:'11px', color:C.muted, marginBottom:'8px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{it.nome}</div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr auto', gap:'6px', alignItems:'end' }}>
+                  <div>
+                    <div style={{ fontSize:'10px', color:C.muted, textTransform:'uppercase', marginBottom:'2px' }}>Data</div>
+                    <input value={it.data} onChange={e=>updateItem(i,'data',e.target.value)} placeholder="DD/MM/AAAA" style={inpStyle} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize:'10px', color:C.muted, textTransform:'uppercase', marginBottom:'2px' }}>Ativo</div>
+                    <input value={it.codigo} onChange={e=>updateItem(i,'codigo',e.target.value)} style={inpStyle} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize:'10px', color:C.muted, textTransform:'uppercase', marginBottom:'2px' }}>Resultado líq.</div>
+                    <input value={it.resultado} onChange={e=>updateItem(i,'resultado',e.target.value)} style={{...inpStyle, color: parseFloat(String(it.resultado).replace(',','.'))>=0?C.green:C.red}} />
+                  </div>
+                  <button onClick={()=>removeItem(i)} style={{ background:'none', border:'none', color:C.red, fontSize:'18px', cursor:'pointer', padding:'6px' }}>×</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={salvar} disabled={saving} style={{ width:'100%', borderRadius:'10px', padding:'12px', background:C.gold, color:'#1A1206', border:'none', fontSize:'14px', fontWeight:600, cursor:'pointer', marginBottom:'8px' }}>
+            {saving?'Salvando...':`Salvar ${itens.length} pregão(ões)`}
           </button>
-        )}
-        <button onClick={()=>{setLinhas(null);setExpandMes(null);}} style={{ width:'100%', borderRadius:'10px', padding:'12px', background:'none', border:`1px solid ${C.border}`, color:C.muted, fontSize:'14px', cursor:'pointer' }}>
-          Importar outro arquivo
-        </button>
+        </React.Fragment>
+      )}
+      {saved && <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.green, fontSize:'13px', justifyContent:'center', padding:'12px' }}><IcoCheck/> Pregões salvos com sucesso</div>}
+
+      <div style={{ fontSize:'11px', color:C.muted, marginTop:'8px', lineHeight:'1.5' }}>
+        O app procura na nota o "Total líquido da nota" e a data do pregão. Confira sempre os valores antes de salvar — o layout pode variar entre corretoras.
       </div>
     </div>
   );
 }
+
+// ── Sub-aba: Resumo Day Trade (mensal + DARF) ───────────────────────────────
+function TabResumoDT({ user }) {
+  const [pregoes, setPregoes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expandMes, setExpandMes] = useState(null);
+
+  useEffect(() => {
+    return db.collection('usuarios').doc(user.uid).collection('daytrade_pregoes')
+      .onSnapshot(snap=>{ setPregoes(snap.docs.map(d=>d.data())); setLoading(false); }, ()=>setLoading(false));
+  }, [user.uid]);
+
+  const meses = {};
+  pregoes.forEach(p=>{
+    if (!p.data) return;
+    const dt = parseDataStr(p.data);
+    const mk = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
+    if(!meses[mk]) meses[mk]={dias:[],resultado:0};
+    meses[mk].dias.push(p); meses[mk].resultado += (p.resultado||0);
+  });
+  const mesesOrdenados = Object.entries(meses).sort((a,b)=>a[0]<b[0]?1:-1);
+
+  if (loading) return <div style={{ textAlign:'center', color:C.muted, fontSize:'14px', padding:'32px' }}>Carregando...</div>;
+  if (mesesOrdenados.length===0) return (
+    <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'32px 20px', textAlign:'center', color:C.muted, fontSize:'13px', lineHeight:'1.6' }}>
+      Nenhum pregão de day trade salvo ainda.<br/>Importe as notas na aba "Notas PDF".
+    </div>
+  );
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+      {mesesOrdenados.map(([mk,info])=>{
+        const lucro = info.resultado>0;
+        const darf = lucro ? info.resultado*0.2 : 0;
+        const gera = darf>=10;
+        const open = expandMes===mk;
+        const dias = [...info.dias].sort((a,b)=>parseDataStr(a.data)-parseDataStr(b.data));
+        return (
+          <div key={mk} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden' }}>
+            <button onClick={()=>setExpandMes(open?null:mk)} style={{ width:'100%', padding:'12px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', background:'none', border:'none', cursor:'pointer', color:C.text }}>
+              <div style={{ textAlign:'left' }}>
+                <div style={{ fontSize:'14px', fontWeight:500 }}>{nomeMes(mk)}</div>
+                <div style={{ fontSize:'12px', color:C.muted }}>{dias.length} pregão(ões) · valores oficiais</div>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                <span className="num" style={{ fontWeight:600, color:lucro?C.green:C.red }}>{lucro?'+':''}{fmt(info.resultado)}</span>
+                {open?<IcoUp/>:<IcoDown/>}
+              </div>
+            </button>
+            {open && (
+              <div style={{ borderTop:`1px solid ${C.border}` }}>
+                {dias.map((d,i)=>(
+                  <div key={i} style={{ padding:'8px 16px', display:'flex', justifyContent:'space-between', fontSize:'12px', borderBottom:`1px solid ${C.border}`, color:C.muted }}>
+                    <span className="num">{d.data} · {d.codigo}</span>
+                    <span className="num" style={{ color:(d.resultado||0)>=0?C.green:C.red }}>{fmt(d.resultado||0)}</span>
+                  </div>
+                ))}
+                <div style={{ background:C.surface2, padding:'12px 16px' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:'12px', marginBottom:'6px', color:C.muted }}>
+                    <span>Alíquota (20% sobre lucro)</span><span className="num">{fmt(darf)}</span>
+                  </div>
+                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:'13px', fontWeight:600 }}>
+                    <span style={{ color:C.gold }}>{gera?'DARF estimado (cód. 6015)':'Sem DARF'}</span>
+                    <span className="num" style={{ color:C.gold }}>{gera?fmt(darf):'—'}</span>
+                  </div>
+                  {!gera && <div style={{ fontSize:'11px', color:C.muted, marginTop:'4px' }}>{lucro?'Valor abaixo de R$10':'Prejuízo compensável em meses futuros'}</div>}
+                  <div style={{ fontSize:'11px', color:C.muted, marginTop:'6px' }}>* Já inclui taxas/corretagem (extraído da nota).</div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Página Importação (com abas) ────────────────────────────────────────────
+function ImportarExtrato({ user }) {
+  const [tab, setTab] = useState('xlsx');
+  const titulos = { xlsx:'Extrato B3', pdf:'Notas de corretagem', resumo:'Resumo Day Trade' };
+  return (
+    <div style={{ background:C.bg, minHeight:'100vh', padding:'16px 16px 100px' }}>
+      <div style={{ maxWidth:'480px', margin:'0 auto' }}>
+        <div style={{ color:C.gold, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:'4px' }}>Importação</div>
+        <div className="display" style={{ fontSize:'26px', fontWeight:600, marginBottom:'16px' }}>{titulos[tab]}</div>
+        <div style={{ display:'flex', gap:'6px', marginBottom:'20px' }}>
+          <TabBtn active={tab==='xlsx'} onClick={()=>setTab('xlsx')}>Extrato B3</TabBtn>
+          <TabBtn active={tab==='pdf'} onClick={()=>setTab('pdf')}>Notas PDF</TabBtn>
+          <TabBtn active={tab==='resumo'} onClick={()=>setTab('resumo')}>Day Trade</TabBtn>
+        </div>
+        {tab==='xlsx' && <TabExtratoXLSX user={user} />}
+        {tab==='pdf' && <TabNotasPDF user={user} />}
+        {tab==='resumo' && <TabResumoDT user={user} />}
+      </div>
+    </div>
+  );
+}
+
 
 // ── App Root ────────────────────────────────────────────────────────────────
 function App() {
