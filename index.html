@@ -183,21 +183,24 @@ function Dashboard({ user }) {
 
   useEffect(() => {
     if (posicoes.length===0) return;
-    const tickers = [...new Set(posicoes.map(p=>tickerForQuote(p.codigo)))].join(',');
+    const tickers = [...new Set(posicoes.map(p=>tickerForQuote(p.codigo)))];
     setLoadingMercado(true); setErroMercado(null);
-    fetch(`https://brapi.dev/api/quote/${tickers}?dividends=true&token=${BRAPI_TOKEN}`)
-      .then(r=>r.json())
-      .then(data => {
-        if (data.error) { setErroMercado(data.message || 'Erro ao buscar cotações.'); return; }
-        const cot = {}, div = {};
-        (data.results||[]).forEach(r => {
-          cot[r.symbol] = r.regularMarketPrice;
-          div[r.symbol] = (r.dividendsData && r.dividendsData.cashDividends) || [];
-        });
-        setCotacoes(cot); setDividendos(div);
-      })
-      .catch(()=>setErroMercado('Não foi possível buscar cotações agora.'))
-      .finally(()=>setLoadingMercado(false));
+    Promise.all(tickers.map(tk =>
+      fetch(`https://brapi.dev/api/quote/${tk}?dividends=true&token=${BRAPI_TOKEN}`)
+        .then(r=>r.json())
+        .then(data => (data.results && data.results[0]) || null)
+        .catch(()=>null)
+    )).then(resultados => {
+      const cot = {}, div = {};
+      let algumErro = false;
+      resultados.forEach((r,i) => {
+        if (!r) { algumErro = true; return; }
+        cot[r.symbol] = r.regularMarketPrice;
+        div[r.symbol] = (r.dividendsData && r.dividendsData.cashDividends) || [];
+      });
+      setCotacoes(cot); setDividendos(div);
+      if (algumErro) setErroMercado('Alguns ativos não puderam ser consultados agora (limite ou ticker não encontrado).');
+    }).finally(()=>setLoadingMercado(false));
   }, [tickersKey]);
 
   const valorAtual = posicoes.reduce((s,p)=>{
