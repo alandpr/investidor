@@ -935,23 +935,171 @@ function TabResumoDT({ user }) {
   );
 }
 
+// ── Sub-aba: Cadastro de FIIs (CNPJ para integração CVM) ────────────────────
+const maskCNPJ = v => {
+  const d = String(v||'').replace(/\D/g,'').slice(0,14);
+  let r = d;
+  if (d.length>2) r = d.slice(0,2)+'.'+d.slice(2);
+  if (d.length>5) r = r.slice(0,6)+'.'+r.slice(6);
+  if (d.length>8) r = r.slice(0,10)+'/'+r.slice(10);
+  if (d.length>12) r = r.slice(0,15)+'-'+r.slice(15);
+  return r;
+};
+
+function TabCadastroFII({ user }) {
+  const [ops, setOps] = useState([]);
+  const [cadastros, setCadastros] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [edits, setEdits] = useState({});
+  const [savingTicker, setSavingTicker] = useState(null);
+  const [novoTicker, setNovoTicker] = useState('');
+  const [novoCNPJ, setNovoCNPJ] = useState('');
+  const [novoNome, setNovoNome] = useState('');
+  const [savingNovo, setSavingNovo] = useState(false);
+
+  useEffect(() => {
+    return db.collection('usuarios').doc(user.uid).collection('operacoes')
+      .onSnapshot(snap => setOps(snap.docs.map(d=>d.data())), ()=>{});
+  }, [user.uid]);
+
+  useEffect(() => {
+    return db.collection('usuarios').doc(user.uid).collection('fii_cadastro')
+      .onSnapshot(snap => {
+        const m = {};
+        snap.docs.forEach(d=>{ m[d.id]=d.data(); });
+        setCadastros(m); setLoading(false);
+      }, ()=>setLoading(false));
+  }, [user.uid]);
+
+  const posicoesFII = calcPosicoes(ops).filter(p=>p.tipoAtivo==='FII');
+  const extras = Object.keys(cadastros).filter(t=>!posicoesFII.some(p=>p.codigo===t));
+
+  const inp = { background:C.surface2, border:`1px solid ${C.border}`, color:C.text, borderRadius:'8px', padding:'10px 12px', width:'100%', fontSize:'14px', fontFamily:"'IBM Plex Mono',monospace" };
+  const lbl = { color:C.muted, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.08em', display:'block', marginBottom:'6px' };
+
+  const salvar = async (ticker, cnpjRaw, nome) => {
+    const digits = String(cnpjRaw||'').replace(/\D/g,'');
+    if (digits.length!==14) return;
+    setSavingTicker(ticker);
+    try {
+      await db.collection('usuarios').doc(user.uid).collection('fii_cadastro').doc(ticker).set({
+        ticker, cnpj: digits, nome: nome||'', atualizadoEm: firebase.firestore.FieldValue.serverTimestamp()
+      }, {merge:true});
+    } finally { setSavingTicker(null); }
+  };
+
+  const remover = async ticker => {
+    await db.collection('usuarios').doc(user.uid).collection('fii_cadastro').doc(ticker).delete();
+  };
+
+  const adicionarExtra = async () => {
+    const ticker = novoTicker.trim().toUpperCase();
+    const digits = novoCNPJ.replace(/\D/g,'');
+    if (!ticker || digits.length!==14) return;
+    setSavingNovo(true);
+    try {
+      await db.collection('usuarios').doc(user.uid).collection('fii_cadastro').doc(ticker).set({
+        ticker, cnpj: digits, nome: novoNome.trim(), atualizadoEm: firebase.firestore.FieldValue.serverTimestamp()
+      }, {merge:true});
+      setNovoTicker(''); setNovoCNPJ(''); setNovoNome('');
+    } finally { setSavingNovo(false); }
+  };
+
+  if (loading) return <div style={{ textAlign:'center', color:C.muted, fontSize:'14px', padding:'32px' }}>Carregando...</div>;
+
+  return (
+    <div>
+      <div style={{ background:'rgba(217,168,92,0.08)', border:`1px solid ${C.gold}`, borderRadius:'10px', padding:'10px 12px', marginBottom:'16px', fontSize:'12px', color:C.muted, display:'flex', gap:'8px', alignItems:'flex-start' }}>
+        <span style={{ color:C.gold, marginTop:'1px' }}><IcoInfo/></span>
+        Cadastre o CNPJ de cada FII (do fundo, não seu CPF). Isso permite que o app cruze os rendimentos divulgados pela CVM com a sua carteira e lance os proventos automaticamente.
+      </div>
+
+      {posicoesFII.length===0 && extras.length===0 && (
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'32px 20px', textAlign:'center', color:C.muted, fontSize:'13px', lineHeight:'1.6', marginBottom:'20px' }}>
+          Você ainda não tem FIIs na carteira.
+        </div>
+      )}
+
+      {posicoesFII.length>0 && (
+        <div style={{ display:'flex', flexDirection:'column', gap:'10px', marginBottom:'20px' }}>
+          {posicoesFII.map(p=>{
+            const atual = cadastros[p.codigo];
+            const valor = edits[p.codigo]!==undefined ? edits[p.codigo] : (atual ? maskCNPJ(atual.cnpj) : '');
+            return (
+              <div key={p.codigo} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+                  <span className="num" style={{ fontWeight:600, fontSize:'14px' }}>{p.codigo}</span>
+                  {atual && <span style={{ display:'flex', alignItems:'center', gap:'4px', color:C.green, fontSize:'11px' }}><IcoCheck/> cadastrado</span>}
+                </div>
+                <div style={{ display:'flex', gap:'8px' }}>
+                  <input value={valor} onChange={e=>setEdits(s=>({...s,[p.codigo]:maskCNPJ(e.target.value)}))} placeholder="00.000.000/0000-00" maxLength={18} style={inp} />
+                  <button onClick={()=>salvar(p.codigo, edits[p.codigo]!==undefined?edits[p.codigo]:(atual?atual.cnpj:''))}
+                    disabled={savingTicker===p.codigo}
+                    style={{ borderRadius:'8px', padding:'10px 16px', background:C.gold, color:'#1A1206', border:'none', fontSize:'13px', fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>
+                    {savingTicker===p.codigo?'...':'Salvar'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {extras.length>0 && (
+        <React.Fragment>
+          <div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:'8px' }}>Outros FIIs cadastrados</div>
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden', marginBottom:'20px' }}>
+            {extras.map((t,i)=>(
+              <div key={t} style={{ padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:i<extras.length-1?`1px solid ${C.border}`:'none' }}>
+                <div>
+                  <span className="num" style={{ fontWeight:600, fontSize:'13px' }}>{t}</span>
+                  <span style={{ color:C.muted, fontSize:'12px', marginLeft:'8px' }}>{maskCNPJ(cadastros[t].cnpj)}</span>
+                </div>
+                <button onClick={()=>remover(t)} style={{ background:'none', border:'none', color:C.red, fontSize:'12px', cursor:'pointer' }}>remover</button>
+              </div>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+
+      <div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:'8px' }}>Adicionar outro FII</div>
+      <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'16px', display:'flex', flexDirection:'column', gap:'12px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 2fr', gap:'8px' }}>
+          <div><label style={lbl}>Ticker</label><input value={novoTicker} onChange={e=>setNovoTicker(e.target.value.toUpperCase())} placeholder="XPML11" maxLength={6} style={inp} /></div>
+          <div><label style={lbl}>CNPJ do fundo</label><input value={novoCNPJ} onChange={e=>setNovoCNPJ(maskCNPJ(e.target.value))} placeholder="00.000.000/0000-00" maxLength={18} style={inp} /></div>
+        </div>
+        <div><label style={lbl}>Nome (opcional)</label><input value={novoNome} onChange={e=>setNovoNome(e.target.value)} placeholder="Nome do fundo" style={inp} /></div>
+        <button onClick={adicionarExtra} disabled={savingNovo} style={{ borderRadius:'10px', padding:'12px', background:C.gold, color:'#1A1206', border:'none', fontSize:'14px', fontWeight:600, cursor:'pointer' }}>
+          {savingNovo?'Salvando...':'Adicionar'}
+        </button>
+      </div>
+
+      <div style={{ fontSize:'11px', color:C.muted, marginTop:'12px', lineHeight:'1.5' }}>
+        O CNPJ do fundo (diferente do seu CPF) pode ser encontrado na página do FII na B3, no Fundamentus ou no informe mensal do fundo.
+      </div>
+    </div>
+  );
+}
+
 // ── Página Importação (com abas) ────────────────────────────────────────────
 function ImportarExtrato({ user }) {
   const [tab, setTab] = useState('xlsx');
-  const titulos = { xlsx:'Extrato B3', pdf:'Notas de corretagem', resumo:'Resumo Day Trade' };
+  const titulos = { xlsx:'Extrato B3', pdf:'Notas de corretagem', resumo:'Resumo Day Trade', cvm:'Cadastro de FIIs (CVM)' };
   return (
     <div style={{ background:C.bg, minHeight:'100vh', padding:'16px 16px 100px' }}>
       <div style={{ maxWidth:'480px', margin:'0 auto' }}>
         <div style={{ color:C.gold, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:'4px' }}>Importação</div>
         <div className="display" style={{ fontSize:'26px', fontWeight:600, marginBottom:'16px' }}>{titulos[tab]}</div>
-        <div style={{ display:'flex', gap:'6px', marginBottom:'20px' }}>
+        <div style={{ display:'flex', gap:'6px', marginBottom:'20px', flexWrap:'wrap' }}>
           <TabBtn active={tab==='xlsx'} onClick={()=>setTab('xlsx')}>Extrato B3</TabBtn>
           <TabBtn active={tab==='pdf'} onClick={()=>setTab('pdf')}>Notas PDF</TabBtn>
           <TabBtn active={tab==='resumo'} onClick={()=>setTab('resumo')}>Day Trade</TabBtn>
+          <TabBtn active={tab==='cvm'} onClick={()=>setTab('cvm')}>FIIs (CVM)</TabBtn>
         </div>
         {tab==='xlsx' && <TabExtratoXLSX user={user} />}
         {tab==='pdf' && <TabNotasPDF user={user} />}
         {tab==='resumo' && <TabResumoDT user={user} />}
+        {tab==='cvm' && <TabCadastroFII user={user} />}
       </div>
     </div>
   );
