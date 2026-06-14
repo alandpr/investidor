@@ -165,9 +165,9 @@ const fmtDataBR = iso => { if(!iso) return '-'; const [y,m,d]=String(iso).split(
 
 function Dashboard({ user }) {
   const [ops, setOps] = useState([]);
+  const [proventos, setProventos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [cotacoes, setCotacoes] = useState({});
-  const [dividendos, setDividendos] = useState({});
   const [loadingMercado, setLoadingMercado] = useState(false);
   const [erroMercado, setErroMercado] = useState(null);
 
@@ -175,6 +175,11 @@ function Dashboard({ user }) {
     return db.collection('usuarios').doc(user.uid).collection('operacoes')
       .orderBy('data','asc')
       .onSnapshot(snap => { setOps(snap.docs.map(d=>({id:d.id,...d.data()}))); setLoading(false); }, ()=>setLoading(false));
+  }, [user.uid]);
+
+  useEffect(() => {
+    return db.collection('usuarios').doc(user.uid).collection('proventos')
+      .onSnapshot(snap => setProventos(snap.docs.map(d=>d.data())), ()=>{});
   }, [user.uid]);
 
   const posicoes = calcPosicoes(ops);
@@ -186,19 +191,18 @@ function Dashboard({ user }) {
     const tickers = [...new Set(posicoes.map(p=>tickerForQuote(p.codigo)))];
     setLoadingMercado(true); setErroMercado(null);
     Promise.all(tickers.map(tk =>
-      fetch(`https://brapi.dev/api/quote/${tk}?dividends=true&token=${BRAPI_TOKEN}`)
+      fetch(`https://brapi.dev/api/quote/${tk}?token=${BRAPI_TOKEN}`)
         .then(r=>r.json())
         .then(data => (data.results && data.results[0]) || null)
         .catch(()=>null)
     )).then(resultados => {
-      const cot = {}, div = {};
+      const cot = {};
       let algumErro = false;
       resultados.forEach((r,i) => {
         if (!r) { algumErro = true; return; }
         cot[r.symbol] = r.regularMarketPrice;
-        div[r.symbol] = (r.dividendsData && r.dividendsData.cashDividends) || [];
       });
-      setCotacoes(cot); setDividendos(div);
+      setCotacoes(cot);
       if (algumErro) setErroMercado('Alguns ativos não puderam ser consultados agora (limite ou ticker não encontrado).');
     }).finally(()=>setLoadingMercado(false));
   }, [tickersKey]);
@@ -211,32 +215,14 @@ function Dashboard({ user }) {
   const variacaoPct = investido>0 ? (variacao/investido)*100 : 0;
   const temCotacao = Object.keys(cotacoes).length>0;
 
-  // ── Proventos: cruza histórico de dividendos da brapi com a posição em cada data-com
+  // ── Proventos lançados manualmente: total nos últimos 30 dias e no mês atual
   const hoje = new Date().toISOString().slice(0,10);
-  const ha60 = new Date(Date.now()-60*86400000).toISOString().slice(0,10);
-  const recebidos = [], aReceber = [];
-  posicoes.forEach(p => {
-    const tk = tickerForQuote(p.codigo);
-    (dividendos[tk]||[]).forEach(d => {
-      const dataCom = d.lastDatePrior || d.dataCom || null;
-      const pagamento = d.paymentDate || null;
-      const rate = d.rate ?? d.value ?? null;
-      if (rate==null) return;
-      if (pagamento && pagamento<=hoje) {
-        if (pagamento>=ha60) {
-          const qtd = dataCom ? qtyAtDate(ops, p.codigo, dataCom) : p.qtd;
-          if (qtd>0) recebidos.push({ codigo:p.codigo, data:pagamento, valor:qtd*rate, tipo:d.label||'Provento' });
-        }
-      } else {
-        const qtd = (dataCom && dataCom<=hoje) ? qtyAtDate(ops, p.codigo, dataCom) : p.qtd;
-        if (qtd>0) aReceber.push({ codigo:p.codigo, data:pagamento||dataCom, valor:qtd*rate, tipo:d.label||'Provento' });
-      }
-    });
-  });
-  recebidos.sort((a,b)=> a.data<b.data?1:-1);
-  aReceber.sort((a,b)=> a.data<b.data?-1:1);
-  const totalRecebido = recebidos.reduce((s,r)=>s+r.valor,0);
-  const totalAReceber = aReceber.reduce((s,r)=>s+r.valor,0);
+  const ha30 = new Date(Date.now()-30*86400000).toISOString().slice(0,10);
+  const mesAtual = hoje.slice(0,7);
+  const recebidos30d = proventos.filter(p=>p.data>=ha30 && p.data<=hoje).sort((a,b)=> a.data<b.data?1:-1);
+  const recebidosMes = proventos.filter(p=>p.data.slice(0,7)===mesAtual);
+  const totalRecebido30d = recebidos30d.reduce((s,r)=>s+r.total,0);
+  const totalRecebidoMes = recebidosMes.reduce((s,r)=>s+r.total,0);
 
   const s = { padding:'16px 16px 100px', maxWidth:'600px', margin:'0 auto' };
 
@@ -264,26 +250,22 @@ function Dashboard({ user }) {
         {posicoes.length>0 && (
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'24px' }}>
             <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px' }}>
-              <div style={{ color:C.muted, fontSize:'10px', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'6px' }}>Recebido (60d)</div>
-              <div className="num" style={{ fontSize:'18px', fontWeight:600, color:C.green, marginBottom:'8px' }}>{fmt(totalRecebido)}</div>
-              {recebidos.slice(0,4).map((r,i)=>(
+              <div style={{ color:C.muted, fontSize:'10px', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'6px' }}>Recebido (30d)</div>
+              <div className="num" style={{ fontSize:'18px', fontWeight:600, color:C.green, marginBottom:'8px' }}>{fmt(totalRecebido30d)}</div>
+              {recebidos30d.slice(0,4).map((r,i)=>(
                 <div key={i} style={{ display:'flex', justifyContent:'space-between', fontSize:'11px', color:C.muted, marginBottom:'2px' }}>
                   <span className="num">{r.codigo} · {fmtDataBR(r.data)}</span>
-                  <span className="num">{fmt(r.valor)}</span>
+                  <span className="num">{fmt(r.total)}</span>
                 </div>
               ))}
-              {recebidos.length===0 && <div style={{ fontSize:'11px', color:C.muted }}>Nenhum nos últimos 60 dias</div>}
+              {recebidos30d.length===0 && <div style={{ fontSize:'11px', color:C.muted }}>Nenhum lançado nos últimos 30 dias</div>}
             </div>
             <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px' }}>
-              <div style={{ color:C.muted, fontSize:'10px', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'6px' }}>A receber</div>
-              <div className="num" style={{ fontSize:'18px', fontWeight:600, color:C.gold, marginBottom:'8px' }}>{fmt(totalAReceber)}</div>
-              {aReceber.slice(0,4).map((r,i)=>(
-                <div key={i} style={{ display:'flex', justifyContent:'space-between', fontSize:'11px', color:C.muted, marginBottom:'2px' }}>
-                  <span className="num">{r.codigo} · {fmtDataBR(r.data)}</span>
-                  <span className="num">{fmt(r.valor)}</span>
-                </div>
-              ))}
-              {aReceber.length===0 && <div style={{ fontSize:'11px', color:C.muted }}>Nada anunciado</div>}
+              <div style={{ color:C.muted, fontSize:'10px', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'6px' }}>Total no mês</div>
+              <div className="num" style={{ fontSize:'18px', fontWeight:600, color:C.gold, marginBottom:'8px' }}>{fmt(totalRecebidoMes)}</div>
+              <div style={{ fontSize:'11px', color:C.muted, lineHeight:'1.5' }}>
+                {recebidosMes.length>0 ? `${recebidosMes.length} provento(s) lançado(s) este mês` : 'Lance seus proventos em "Lançar → Provento"'}
+              </div>
             </div>
           </div>
         )}
@@ -342,7 +324,8 @@ function Dashboard({ user }) {
 
 
 // ── Lançar Operação ─────────────────────────────────────────────────────────
-function LancarOperacao({ user }) {
+// ── Lançar: Operação ─────────────────────────────────────────────────────────
+function TabOperacao({ user }) {
   const [tipo, setTipo] = useState('compra');
   const [ticker, setTicker] = useState('');
   const [tipoAtivo, setTipoAtivo] = useState('Ação');
@@ -387,58 +370,190 @@ function LancarOperacao({ user }) {
   );
 
   return (
+    <div>
+      <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
+        {btnTipo('compra','↓  Compra')}{btnTipo('venda','↑  Venda')}
+      </div>
+
+      <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'16px', display:'flex', flexDirection:'column', gap:'16px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:'8px' }}>
+          <div>
+            <label style={lbl}>Ticker</label>
+            <input value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} placeholder="PETR4" maxLength={6} style={inp} />
+          </div>
+          <div>
+            <label style={lbl}>Tipo</label>
+            <select value={tipoAtivo} onChange={e=>setTipoAtivo(e.target.value)} style={{ ...inp, fontFamily:'Inter,sans-serif' }}>
+              <option>Ação</option><option>FII</option><option>ETF</option><option>BDR</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label style={lbl}>Data do pregão</label>
+          <input type="date" value={data} onChange={e=>setData(e.target.value)} style={inp} />
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
+          <div><label style={lbl}>Quantidade</label><input type="number" inputMode="numeric" value={qtd} onChange={e=>setQtd(e.target.value)} placeholder="0" style={inp} /></div>
+          <div><label style={lbl}>Preço unitário</label><input inputMode="decimal" value={preco} onChange={e=>setPreco(e.target.value)} placeholder="0,00" style={inp} /></div>
+        </div>
+
+        <div><label style={lbl}>Taxas e corretagem</label><input inputMode="decimal" value={taxas} onChange={e=>setTaxas(e.target.value)} placeholder="0,00" style={inp} /></div>
+
+        <div style={{ background:C.surface2, border:`1px solid ${C.border}`, borderRadius:'8px', padding:'12px' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', fontSize:'13px', marginBottom:'6px' }}>
+            <span style={{ color:C.muted }}>Valor bruto</span><span className="num">{fmt(bruto)}</span>
+          </div>
+          <div style={{ display:'flex', justifyContent:'space-between', fontSize:'13px', marginBottom:'8px' }}>
+            <span style={{ color:C.muted }}>{tipo==='compra'?'+ Taxas':'− Taxas'}</span><span className="num">{fmt(taxasN)}</span>
+          </div>
+          <div style={{ display:'flex', justifyContent:'space-between', fontSize:'14px', fontWeight:600, borderTop:`1px solid ${C.border}`, paddingTop:'8px' }}>
+            <span>Total {tipo==='compra'?'pago':'recebido'}</span>
+            <span className="num" style={{ color:C.gold }}>{fmt(total)}</span>
+          </div>
+        </div>
+      </div>
+
+      <button onClick={submit} disabled={!valid||saving} style={{ width:'100%', marginTop:'20px', borderRadius:'10px', padding:'14px', background:valid?C.gold:C.surface2, color:valid?'#1A1206':C.muted, border:'none', fontSize:'14px', fontWeight:600, cursor:valid?'pointer':'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
+        {saved?<><IcoCheck/> Operação lançada</>:saving?'Salvando...':'Lançar operação'}
+      </button>
+    </div>
+  );
+}
+
+// ── Lançar: Provento (dividendo / JCP / rendimento) ─────────────────────────
+function TabProvento({ user }) {
+  const [ops, setOps] = useState([]);
+  const [ticker, setTicker] = useState('');
+  const [tipoProvento, setTipoProvento] = useState('Rendimento');
+  const [data, setData] = useState(new Date().toISOString().slice(0,10));
+  const [valorCota, setValorCota] = useState('');
+  const [qtd, setQtd] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [recentes, setRecentes] = useState([]);
+
+  useEffect(() => {
+    return db.collection('usuarios').doc(user.uid).collection('operacoes')
+      .onSnapshot(snap => setOps(snap.docs.map(d=>d.data())), ()=>{});
+  }, [user.uid]);
+
+  useEffect(() => {
+    return db.collection('usuarios').doc(user.uid).collection('proventos')
+      .orderBy('data','desc').limit(8)
+      .onSnapshot(snap => setRecentes(snap.docs.map(d=>({id:d.id,...d.data()}))), ()=>{});
+  }, [user.uid]);
+
+  // ao digitar um ticker que já está na carteira, sugere a quantidade atual
+  const sugerirQtd = () => {
+    const codigo = ticker.trim().toUpperCase();
+    if (!codigo) return;
+    const posicoes = calcPosicoes(ops);
+    const p = posicoes.find(p=>p.codigo===codigo);
+    if (p) setQtd(String(p.qtd));
+  };
+
+  const valorCotaN = parseFloat(String(valorCota).replace(',','.'))||0;
+  const qtdN = parseFloat(qtd)||0;
+  const total = valorCotaN * qtdN;
+  const valid = ticker.trim().length>=4 && valorCotaN>0 && qtdN>0 && data;
+
+  const inp = { background:C.surface2, border:`1px solid ${C.border}`, color:C.text, borderRadius:'8px', padding:'10px 12px', width:'100%', fontSize:'14px', fontFamily:"'IBM Plex Mono',monospace" };
+  const lbl = { color:C.muted, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.08em', display:'block', marginBottom:'6px' };
+
+  const submit = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try {
+      await db.collection('usuarios').doc(user.uid).collection('proventos').add({
+        codigo: ticker.trim().toUpperCase(), tipo: tipoProvento, data,
+        valorCota: valorCotaN, qtd: qtdN, total,
+        criadoEm: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      setSaved(true); setTicker(''); setValorCota(''); setQtd('');
+      setTimeout(()=>setSaved(false), 2000);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'16px', display:'flex', flexDirection:'column', gap:'16px', marginBottom:'20px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:'8px' }}>
+          <div>
+            <label style={lbl}>Ticker</label>
+            <input value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onBlur={sugerirQtd} placeholder="MXRF11" maxLength={6} style={inp} />
+          </div>
+          <div>
+            <label style={lbl}>Tipo</label>
+            <select value={tipoProvento} onChange={e=>setTipoProvento(e.target.value)} style={{ ...inp, fontFamily:'Inter,sans-serif' }}>
+              <option>Rendimento</option><option>Dividendo</option><option>JCP</option><option>Outro</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label style={lbl}>Data de pagamento</label>
+          <input type="date" value={data} onChange={e=>setData(e.target.value)} style={inp} />
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
+          <div>
+            <label style={lbl}>Valor por cota/ação</label>
+            <input inputMode="decimal" value={valorCota} onChange={e=>setValorCota(e.target.value)} placeholder="0,00" style={inp} />
+          </div>
+          <div>
+            <label style={lbl}>Quantidade</label>
+            <input type="number" inputMode="numeric" value={qtd} onChange={e=>setQtd(e.target.value)} placeholder="0" style={inp} />
+          </div>
+        </div>
+
+        <div style={{ background:C.surface2, border:`1px solid ${C.border}`, borderRadius:'8px', padding:'12px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <span style={{ fontSize:'14px', fontWeight:600 }}>Total recebido</span>
+          <span className="num" style={{ fontSize:'16px', fontWeight:600, color:C.green }}>{fmt(total)}</span>
+        </div>
+      </div>
+
+      <button onClick={submit} disabled={!valid||saving} style={{ width:'100%', marginBottom:'24px', borderRadius:'10px', padding:'14px', background:valid?C.gold:C.surface2, color:valid?'#1A1206':C.muted, border:'none', fontSize:'14px', fontWeight:600, cursor:valid?'pointer':'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
+        {saved?<><IcoCheck/> Provento lançado</>:saving?'Salvando...':'Lançar provento'}
+      </button>
+
+      {recentes.length>0 && (
+        <React.Fragment>
+          <div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:'8px' }}>Últimos lançados</div>
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden' }}>
+            {recentes.map((r,i)=>(
+              <div key={r.id} style={{ padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:i<recentes.length-1?`1px solid ${C.border}`:'none' }}>
+                <div>
+                  <span className="num" style={{ fontWeight:600, fontSize:'13px' }}>{r.codigo}</span>
+                  <span style={{ color:C.muted, fontSize:'12px', marginLeft:'8px' }}>{r.tipo} · {fmtDataBR(r.data)}</span>
+                </div>
+                <span className="num" style={{ fontSize:'13px', fontWeight:600, color:C.green }}>{fmt(r.total)}</span>
+              </div>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+// ── Página Lançar (com abas) ────────────────────────────────────────────────
+function LancarOperacao({ user }) {
+  const [tab, setTab] = useState('operacao');
+  return (
     <div style={{ background:C.bg, minHeight:'100vh', padding:'16px 16px 100px' }}>
       <div style={{ maxWidth:'480px', margin:'0 auto' }}>
-        <div style={{ color:C.gold, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:'4px' }}>Nota de corretagem</div>
-        <div className="display" style={{ fontSize:'26px', fontWeight:600, marginBottom:'24px' }}>Lançar operação</div>
-
-        <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
-          {btnTipo('compra','↓  Compra')}{btnTipo('venda','↑  Venda')}
+        <div style={{ color:C.gold, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:'4px' }}>Lançamento</div>
+        <div className="display" style={{ fontSize:'26px', fontWeight:600, marginBottom:'16px' }}>
+          {tab==='operacao' ? 'Operação' : 'Provento'}
         </div>
-
-        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'16px', display:'flex', flexDirection:'column', gap:'16px' }}>
-          <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:'8px' }}>
-            <div>
-              <label style={lbl}>Ticker</label>
-              <input value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} placeholder="PETR4" maxLength={6} style={inp} />
-            </div>
-            <div>
-              <label style={lbl}>Tipo</label>
-              <select value={tipoAtivo} onChange={e=>setTipoAtivo(e.target.value)} style={{ ...inp, fontFamily:'Inter,sans-serif' }}>
-                <option>Ação</option><option>FII</option><option>ETF</option><option>BDR</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label style={lbl}>Data do pregão</label>
-            <input type="date" value={data} onChange={e=>setData(e.target.value)} style={inp} />
-          </div>
-
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
-            <div><label style={lbl}>Quantidade</label><input type="number" inputMode="numeric" value={qtd} onChange={e=>setQtd(e.target.value)} placeholder="0" style={inp} /></div>
-            <div><label style={lbl}>Preço unitário</label><input inputMode="decimal" value={preco} onChange={e=>setPreco(e.target.value)} placeholder="0,00" style={inp} /></div>
-          </div>
-
-          <div><label style={lbl}>Taxas e corretagem</label><input inputMode="decimal" value={taxas} onChange={e=>setTaxas(e.target.value)} placeholder="0,00" style={inp} /></div>
-
-          <div style={{ background:C.surface2, border:`1px solid ${C.border}`, borderRadius:'8px', padding:'12px' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', fontSize:'13px', marginBottom:'6px' }}>
-              <span style={{ color:C.muted }}>Valor bruto</span><span className="num">{fmt(bruto)}</span>
-            </div>
-            <div style={{ display:'flex', justifyContent:'space-between', fontSize:'13px', marginBottom:'8px' }}>
-              <span style={{ color:C.muted }}>{tipo==='compra'?'+ Taxas':'− Taxas'}</span><span className="num">{fmt(taxasN)}</span>
-            </div>
-            <div style={{ display:'flex', justifyContent:'space-between', fontSize:'14px', fontWeight:600, borderTop:`1px solid ${C.border}`, paddingTop:'8px' }}>
-              <span>Total {tipo==='compra'?'pago':'recebido'}</span>
-              <span className="num" style={{ color:C.gold }}>{fmt(total)}</span>
-            </div>
-          </div>
+        <div style={{ display:'flex', gap:'6px', marginBottom:'20px' }}>
+          <TabBtn active={tab==='operacao'} onClick={()=>setTab('operacao')}>Operação</TabBtn>
+          <TabBtn active={tab==='provento'} onClick={()=>setTab('provento')}>Provento</TabBtn>
         </div>
-
-        <button onClick={submit} disabled={!valid||saving} style={{ width:'100%', marginTop:'20px', borderRadius:'10px', padding:'14px', background:valid?C.gold:C.surface2, color:valid?'#1A1206':C.muted, border:'none', fontSize:'14px', fontWeight:600, cursor:valid?'pointer':'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
-          {saved?<><IcoCheck/> Operação lançada</>:saving?'Salvando...':'Lançar operação'}
-        </button>
+        {tab==='operacao' && <TabOperacao user={user} />}
+        {tab==='provento' && <TabProvento user={user} />}
       </div>
     </div>
   );
