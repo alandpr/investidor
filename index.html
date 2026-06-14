@@ -130,6 +130,8 @@ function Login() {
 }
 
 // ── Dashboard ───────────────────────────────────────────────────────────────
+const BRAPI_TOKEN = 't3g2H8756gEiXjLa7R3Dpc';
+
 function calcPosicoes(ops) {
   const sorted = [...ops].sort((a,b)=>a.data<b.data?-1:1);
   const pos = {};
@@ -145,9 +147,29 @@ function calcPosicoes(ops) {
   return Object.values(pos).filter(p=>p.qtd>0);
 }
 
+// quantidade que o usuário possuía de um ativo até uma determinada data (inclusive)
+function qtyAtDate(ops, codigo, dateISO) {
+  let qtd = 0;
+  ops.filter(o=>o.codigo===codigo && o.data<=dateISO)
+     .sort((a,b)=>a.data<b.data?-1:1)
+     .forEach(op => { qtd += op.tipo==='compra' ? op.qtd : -op.qtd; });
+  return Math.max(0, qtd);
+}
+
+// remove sufixo de mercado fracionário (ex: RAIZ4F -> RAIZ4) para consultar a API
+function tickerForQuote(codigo) {
+  return /^[A-Z]{4}\d{1,2}F$/.test(codigo) ? codigo.slice(0,-1) : codigo;
+}
+
+const fmtDataBR = iso => { if(!iso) return '-'; const [y,m,d]=String(iso).split('-'); return `${d}/${m}/${y}`; };
+
 function Dashboard({ user }) {
   const [ops, setOps] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [cotacoes, setCotacoes] = useState({});
+  const [dividendos, setDividendos] = useState({});
+  const [loadingMercado, setLoadingMercado] = useState(false);
+  const [erroMercado, setErroMercado] = useState(null);
 
   useEffect(() => {
     return db.collection('usuarios').doc(user.uid).collection('operacoes')
@@ -157,19 +179,111 @@ function Dashboard({ user }) {
 
   const posicoes = calcPosicoes(ops);
   const investido = posicoes.reduce((s,p)=>s+p.qtd*p.avg, 0);
+  const tickersKey = posicoes.map(p=>p.codigo).sort().join(',');
+
+  useEffect(() => {
+    if (posicoes.length===0) return;
+    const tickers = [...new Set(posicoes.map(p=>tickerForQuote(p.codigo)))].join(',');
+    setLoadingMercado(true); setErroMercado(null);
+    fetch(`https://brapi.dev/api/quote/${tickers}?dividends=true&token=${BRAPI_TOKEN}`)
+      .then(r=>r.json())
+      .then(data => {
+        if (data.error) { setErroMercado(data.message || 'Erro ao buscar cotações.'); return; }
+        const cot = {}, div = {};
+        (data.results||[]).forEach(r => {
+          cot[r.symbol] = r.regularMarketPrice;
+          div[r.symbol] = (r.dividendsData && r.dividendsData.cashDividends) || [];
+        });
+        setCotacoes(cot); setDividendos(div);
+      })
+      .catch(()=>setErroMercado('Não foi possível buscar cotações agora.'))
+      .finally(()=>setLoadingMercado(false));
+  }, [tickersKey]);
+
+  const valorAtual = posicoes.reduce((s,p)=>{
+    const preco = cotacoes[tickerForQuote(p.codigo)];
+    return s + p.qtd * (preco!=null ? preco : p.avg);
+  }, 0);
+  const variacao = valorAtual - investido;
+  const variacaoPct = investido>0 ? (variacao/investido)*100 : 0;
+  const temCotacao = Object.keys(cotacoes).length>0;
+
+  // ── Proventos: cruza histórico de dividendos da brapi com a posição em cada data-com
+  const hoje = new Date().toISOString().slice(0,10);
+  const ha60 = new Date(Date.now()-60*86400000).toISOString().slice(0,10);
+  const recebidos = [], aReceber = [];
+  posicoes.forEach(p => {
+    const tk = tickerForQuote(p.codigo);
+    (dividendos[tk]||[]).forEach(d => {
+      const dataCom = d.lastDatePrior || d.dataCom || null;
+      const pagamento = d.paymentDate || null;
+      const rate = d.rate ?? d.value ?? null;
+      if (rate==null) return;
+      if (pagamento && pagamento<=hoje) {
+        if (pagamento>=ha60) {
+          const qtd = dataCom ? qtyAtDate(ops, p.codigo, dataCom) : p.qtd;
+          if (qtd>0) recebidos.push({ codigo:p.codigo, data:pagamento, valor:qtd*rate, tipo:d.label||'Provento' });
+        }
+      } else {
+        const qtd = (dataCom && dataCom<=hoje) ? qtyAtDate(ops, p.codigo, dataCom) : p.qtd;
+        if (qtd>0) aReceber.push({ codigo:p.codigo, data:pagamento||dataCom, valor:qtd*rate, tipo:d.label||'Provento' });
+      }
+    });
+  });
+  recebidos.sort((a,b)=> a.data<b.data?1:-1);
+  aReceber.sort((a,b)=> a.data<b.data?-1:1);
+  const totalRecebido = recebidos.reduce((s,r)=>s+r.valor,0);
+  const totalAReceber = aReceber.reduce((s,r)=>s+r.valor,0);
+
   const s = { padding:'16px 16px 100px', maxWidth:'600px', margin:'0 auto' };
 
   return (
     <div style={{ background:C.bg, minHeight:'100vh' }}>
       <div style={s}>
         <div style={{ color:C.gold, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:'4px' }}>Carteira · Resumo</div>
-        <div className="display num" style={{ fontSize:'36px', fontWeight:600, marginBottom:'4px' }}>{fmt(investido)}</div>
-        <div style={{ color:C.muted, fontSize:'13px', marginBottom:'12px' }}>Valor investido total</div>
-
-        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'10px 12px', marginBottom:'24px', display:'flex', gap:'8px', fontSize:'12px', color:C.muted, alignItems:'flex-start' }}>
-          <span style={{ color:C.gold, marginTop:'1px' }}><IcoInfo/></span>
-          Cotações em tempo real e proventos serão ativados na próxima etapa (integração brapi/bolsai).
+        <div className="display num" style={{ fontSize:'36px', fontWeight:600, marginBottom:'4px' }}>{fmt(valorAtual)}</div>
+        <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:'8px', fontSize:'13px', marginBottom:'16px' }}>
+          <span style={{ color:C.muted }}>Investido: <span className="num">{fmt(investido)}</span></span>
+          {temCotacao && (
+            <span className="num" style={{ fontWeight:600, color: variacao>=0?C.green:C.red, display:'flex', alignItems:'center', gap:'4px' }}>
+              {variacao>=0?<IcoUp/>:<IcoDown/>} {fmt(Math.abs(variacao))} ({Math.abs(variacaoPct).toFixed(2)}%)
+            </span>
+          )}
         </div>
+
+        {loadingMercado && <div style={{ fontSize:'12px', color:C.muted, marginBottom:'12px' }}>Buscando cotações e dividendos...</div>}
+        {erroMercado && (
+          <div style={{ background:'rgba(248,113,113,0.08)', border:`1px solid ${C.red}`, color:C.red, borderRadius:'10px', padding:'10px 12px', marginBottom:'16px', fontSize:'12px', display:'flex', gap:'8px', alignItems:'flex-start' }}>
+            <IcoAlert/>{erroMercado}
+          </div>
+        )}
+
+        {posicoes.length>0 && (
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'24px' }}>
+            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px' }}>
+              <div style={{ color:C.muted, fontSize:'10px', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'6px' }}>Recebido (60d)</div>
+              <div className="num" style={{ fontSize:'18px', fontWeight:600, color:C.green, marginBottom:'8px' }}>{fmt(totalRecebido)}</div>
+              {recebidos.slice(0,4).map((r,i)=>(
+                <div key={i} style={{ display:'flex', justifyContent:'space-between', fontSize:'11px', color:C.muted, marginBottom:'2px' }}>
+                  <span className="num">{r.codigo} · {fmtDataBR(r.data)}</span>
+                  <span className="num">{fmt(r.valor)}</span>
+                </div>
+              ))}
+              {recebidos.length===0 && <div style={{ fontSize:'11px', color:C.muted }}>Nenhum nos últimos 60 dias</div>}
+            </div>
+            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px' }}>
+              <div style={{ color:C.muted, fontSize:'10px', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'6px' }}>A receber</div>
+              <div className="num" style={{ fontSize:'18px', fontWeight:600, color:C.gold, marginBottom:'8px' }}>{fmt(totalAReceber)}</div>
+              {aReceber.slice(0,4).map((r,i)=>(
+                <div key={i} style={{ display:'flex', justifyContent:'space-between', fontSize:'11px', color:C.muted, marginBottom:'2px' }}>
+                  <span className="num">{r.codigo} · {fmtDataBR(r.data)}</span>
+                  <span className="num">{fmt(r.valor)}</span>
+                </div>
+              ))}
+              {aReceber.length===0 && <div style={{ fontSize:'11px', color:C.muted }}>Nada anunciado</div>}
+            </div>
+          </div>
+        )}
 
         <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.muted, marginBottom:'12px' }}>
           <IcoWallet/><span style={{ fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em' }}>Posições</span>
@@ -182,24 +296,47 @@ function Dashboard({ user }) {
               Nenhuma posição ainda.<br/>Lance operações ou importe um extrato.
             </div>
           )}
-          {posicoes.map((p,i) => (
-            <div key={p.codigo} style={{ padding:'12px 16px', borderBottom:i<posicoes.length-1?`1px solid ${C.border}`:'none' }}>
-              <div style={{ marginBottom:'8px' }}>
-                <span className="num" style={{ fontWeight:600, fontSize:'14px' }}>{p.codigo}</span>
-                <span style={{ color:C.muted, fontSize:'12px', marginLeft:'8px' }}>{p.tipoAtivo}</span>
+          {posicoes.map((p,i) => {
+            const preco = cotacoes[tickerForQuote(p.codigo)];
+            const temPreco = preco!=null;
+            const resultado = temPreco ? (preco-p.avg)*p.qtd : null;
+            const resultadoPct = temPreco && p.avg>0 ? ((preco-p.avg)/p.avg)*100 : null;
+            const positivo = resultado!=null && resultado>=0;
+            return (
+              <div key={p.codigo} style={{ padding:'12px 16px', borderBottom:i<posicoes.length-1?`1px solid ${C.border}`:'none' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'8px', gap:'8px' }}>
+                  <div>
+                    <span className="num" style={{ fontWeight:600, fontSize:'14px' }}>{p.codigo}</span>
+                    <span style={{ color:C.muted, fontSize:'12px', marginLeft:'8px' }}>{p.tipoAtivo}</span>
+                  </div>
+                  {resultadoPct!=null && (
+                    <div style={{ textAlign:'right', flexShrink:0 }}>
+                      <div className="num" style={{ fontSize:'13px', fontWeight:600, color:positivo?C.green:C.red, display:'flex', alignItems:'center', gap:'4px', justifyContent:'flex-end' }}>
+                        {positivo?<IcoUp/>:<IcoDown/>}{Math.abs(resultadoPct).toFixed(2)}%
+                      </div>
+                      <div className="num" style={{ fontSize:'11px', color:C.muted }}>{positivo?'+':'-'}{fmt(Math.abs(resultado))}</div>
+                    </div>
+                  )}
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between', borderTop:`1px solid ${C.border}`, paddingTop:'8px' }}>
+                  <div><div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', marginBottom:'2px' }}>Qtd</div><div className="num" style={{ fontSize:'13px' }}>{p.qtd}</div></div>
+                  <div style={{ textAlign:'center' }}><div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', marginBottom:'2px' }}>Médio</div><div className="num" style={{ fontSize:'13px' }}>{fmt(p.avg)}</div></div>
+                  <div style={{ textAlign:'right' }}><div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', marginBottom:'2px' }}>Atual</div><div className="num" style={{ fontSize:'13px' }}>{temPreco?fmt(preco):'—'}</div></div>
+                  <div style={{ textAlign:'right' }}><div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', marginBottom:'2px' }}>Total</div><div className="num" style={{ fontSize:'13px' }}>{fmt(p.qtd*(temPreco?preco:p.avg))}</div></div>
+                </div>
               </div>
-              <div style={{ display:'flex', justifyContent:'space-between', borderTop:`1px solid ${C.border}`, paddingTop:'8px' }}>
-                <div><div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', marginBottom:'2px' }}>Qtd</div><div className="num" style={{ fontSize:'13px' }}>{p.qtd}</div></div>
-                <div style={{ textAlign:'center' }}><div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', marginBottom:'2px' }}>Preço médio</div><div className="num" style={{ fontSize:'13px' }}>{fmt(p.avg)}</div></div>
-                <div style={{ textAlign:'right' }}><div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', marginBottom:'2px' }}>Total</div><div className="num" style={{ fontSize:'13px' }}>{fmt(p.qtd*p.avg)}</div></div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
+        </div>
+
+        <div style={{ fontSize:'11px', color:C.muted, marginTop:'12px', lineHeight:'1.5' }}>
+          Cotações e dividendos via brapi.dev. "A receber" considera proventos com data-com já confirmada ou estimativa pela posição atual — confira sempre antes de declarar.
         </div>
       </div>
     </div>
   );
 }
+
 
 // ── Lançar Operação ─────────────────────────────────────────────────────────
 function LancarOperacao({ user }) {
