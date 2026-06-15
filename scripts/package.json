@@ -1,0 +1,11 @@
+{
+  "name": "investidor-cvm-sync",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Sincronizacao de proventos de FIIs (CVM) com o Firestore do InvestApp",
+  "main": "sync-cvm.js",
+  "dependencies": {
+    "firebase-admin": "^12.7.0",
+    "adm-zip": "^0.5.16"
+  }
+}
