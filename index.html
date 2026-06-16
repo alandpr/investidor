@@ -581,31 +581,87 @@ function TabBtn({active, onClick, children}) {
 // ── Sub-aba: Extrato B3 (XLSX) ──────────────────────────────────────────────
 function TabExtratoXLSX({ user }) {
   const [linhas, setLinhas] = useState(null);
+  const [rendimentos, setRendimentos] = useState([]);
+  const [tipoArq, setTipoArq] = useState(null); // 'negociacao' | 'movimentacao'
   const [erro, setErro] = useState(null);
   const [expandMes, setExpandMes] = useState(null);
   const [savingC, setSavingC] = useState(false); const [savedC, setSavedC] = useState(false);
+  const [savingP, setSavingP] = useState(false); const [savedP, setSavedP] = useState(false);
+
+  const extractTicker = prod => String(prod||'').split(' - ')[0].trim().toUpperCase();
 
   const handleFile = file => {
-    setErro(null);
+    setErro(null); setSavedC(false); setSavedP(false);
     const r = new FileReader();
     r.onload = e => {
       try {
         const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'});
-        const ws = wb.Sheets[wb.SheetNames.find(n=>/negocia/i.test(n))||wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(ws, {defval:''});
-        setLinhas(json.filter(r=>r['Data do Negócio']).map(r=>({
-          data:r['Data do Negócio'], tipo:r['Tipo de Movimentação'],
-          mercado:r['Mercado'], codigo:r['Código de Negociação'],
-          qtd:parseNum(r['Quantidade']), preco:parseNum(r['Preço']), valor:parseNum(r['Valor'])
-        })));
-        setSavedC(false);
-      } catch { setErro('Não foi possível ler o arquivo. Use o extrato .xlsx do Canal Eletrônico do Investidor (B3).'); }
+        const movSheetName = wb.SheetNames.find(n=>/movimenta/i.test(n));
+        const negSheetName = wb.SheetNames.find(n=>/negocia/i.test(n));
+
+        if (movSheetName) {
+          // ── Arquivo de Movimentação (tem rendimentos de FII) ──
+          const ws = wb.Sheets[movSheetName];
+          const json = XLSX.utils.sheet_to_json(ws, {defval:''});
+
+          // agrupa rendimentos por ticker+data+valorCota (une entradas de corretoras diferentes)
+          const grupos = {};
+          json.forEach(row => {
+            const mov = String(row['Movimentação']||'');
+            if (!/rendimento/i.test(mov)) return;
+            const ticker = extractTicker(row['Produto']);
+            if (!ticker || ticker.startsWith('Futuro')) return;
+            const data = toISO(String(row['Data']));
+            const valorCota = parseNum(row['Preço unitário']);
+            const qtd = parseNum(row['Quantidade']);
+            const total = parseNum(row['Valor da Operação']);
+            if (!data || valorCota <= 0) return;
+            const key = `${ticker}_${data}_${valorCota}`;
+            if (!grupos[key]) grupos[key] = { codigo:ticker, data, valorCota, qtd:0, total:0, refB3:key };
+            grupos[key].qtd += qtd;
+            grupos[key].total = Math.round((grupos[key].total + total)*100)/100;
+          });
+
+          // operações de compra/venda que possam estar no arquivo de movimentação
+          const ops = json.filter(row=>{
+            const mov = String(row['Movimentação']||'');
+            return /^(compra|venda)$/i.test(mov);
+          }).map(row=>({
+            data: String(row['Data']), tipo: String(row['Movimentação']),
+            mercado: /futuro/i.test(String(row['Produto']||'')) ? 'Futuro' : 'Normal',
+            codigo: extractTicker(row['Produto']),
+            qtd: parseNum(row['Quantidade']),
+            preco: parseNum(row['Preço unitário']),
+            valor: parseNum(row['Valor da Operação'])
+          }));
+
+          setRendimentos(Object.values(grupos).sort((a,b)=>a.data<b.data?1:-1));
+          setLinhas(ops);
+          setTipoArq('movimentacao');
+
+        } else {
+          // ── Arquivo de Negociações (formato original) ──
+          const ws = wb.Sheets[negSheetName||wb.SheetNames[0]];
+          const json = XLSX.utils.sheet_to_json(ws, {defval:''});
+          setLinhas(json.filter(r=>r['Data do Negócio']).map(r=>({
+            data:r['Data do Negócio'], tipo:r['Tipo de Movimentação'],
+            mercado:r['Mercado'], codigo:r['Código de Negociação'],
+            qtd:parseNum(r['Quantidade']), preco:parseNum(r['Preço']), valor:parseNum(r['Valor'])
+          })));
+          setRendimentos([]);
+          setTipoArq('negociacao');
+        }
+      } catch(err) { setErro('Não foi possível ler o arquivo. Use o extrato .xlsx do Canal Eletrônico do Investidor (B3).'); }
     };
     r.readAsArrayBuffer(file);
   };
 
   if (!linhas) return (
     <div>
+      <div style={{ background:'rgba(217,168,92,0.05)', border:`1px solid ${C.border}`, borderRadius:'10px', padding:'10px 12px', marginBottom:'14px', fontSize:'12px', color:C.muted, display:'flex', gap:'8px', alignItems:'flex-start' }}>
+        <span style={{ color:C.gold }}><IcoInfo/></span>
+        Aceita dois tipos de arquivo da B3: "Negociações" (compras/vendas) e "Movimentação" (inclui rendimentos de FII automaticamente).
+      </div>
       <label style={{ display:'block', background:C.surface, border:`2px dashed ${C.border}`, borderRadius:'12px', padding:'48px 24px', textAlign:'center', cursor:'pointer' }}>
         <input type="file" accept=".xlsx,.xls,.csv" style={{ display:'none' }} onChange={e=>e.target.files?.[0]&&handleFile(e.target.files[0])} />
         <div style={{ fontSize:'36px', marginBottom:'12px' }}>📂</div>
@@ -616,8 +672,8 @@ function TabExtratoXLSX({ user }) {
     </div>
   );
 
-  const carteira = linhas.filter(l=>l.mercado!=='Futuro');
-  const futuros = linhas.filter(l=>l.mercado==='Futuro');
+  const carteira = (linhas||[]).filter(l=>l.mercado!=='Futuro');
+  const futuros  = (linhas||[]).filter(l=>l.mercado==='Futuro');
   const grupos = {};
   futuros.forEach(l=>{
     const k=`${l.data}__${l.codigo}`;
@@ -640,39 +696,90 @@ function TabExtratoXLSX({ user }) {
       const batch=db.batch();
       carteira.forEach(l=>{
         const ref=db.collection('usuarios').doc(user.uid).collection('operacoes').doc();
-        batch.set(ref,{tipo:l.tipo==='Compra'?'compra':'venda',codigo:l.codigo,tipoAtivo:mapTipo(l.codigo),data:toISO(l.data),qtd:l.qtd,preco:l.preco,taxas:0,total:l.valor,origem:'b3',criadoEm:firebase.firestore.FieldValue.serverTimestamp()});
+        const dataFmt = tipoArq==='movimentacao' ? toISO(l.data) : toISO(l.data);
+        batch.set(ref,{tipo:l.tipo==='Compra'?'compra':'venda',codigo:l.codigo,tipoAtivo:mapTipo(l.codigo),data:dataFmt,qtd:l.qtd,preco:l.preco,taxas:0,total:l.valor,origem:'b3',criadoEm:firebase.firestore.FieldValue.serverTimestamp()});
       });
       await batch.commit(); setSavedC(true);
     } finally { setSavingC(false); }
   };
 
+  const salvarRendimentos = async () => {
+    setSavingP(true);
+    try {
+      // carrega refB3 já existentes pra deduplicar
+      const snap = await db.collection('usuarios').doc(user.uid).collection('proventos')
+        .where('origem','==','b3').get();
+      const jaExistem = new Set(snap.docs.map(d=>d.data().refB3).filter(Boolean));
+
+      const novos = rendimentos.filter(p=>!jaExistem.has(p.refB3));
+      if (novos.length===0) { setSavedP(true); return; }
+
+      const batch=db.batch();
+      novos.forEach(p=>{
+        const ref=db.collection('usuarios').doc(user.uid).collection('proventos').doc();
+        batch.set(ref,{codigo:p.codigo,tipo:'Rendimento',data:p.data,valorCota:p.valorCota,qtd:p.qtd,total:p.total,origem:'b3',refB3:p.refB3,criadoEm:firebase.firestore.FieldValue.serverTimestamp()});
+      });
+      await batch.commit(); setSavedP(true);
+    } finally { setSavingP(false); }
+  };
+
   return (
     <div>
-      <div style={{ color:C.muted, fontSize:'13px', marginBottom:'16px' }}>{linhas.length} lançamentos encontrados</div>
+      <div style={{ color:C.muted, fontSize:'12px', marginBottom:'16px', display:'flex', alignItems:'center', gap:'6px' }}>
+        <span style={{ background:C.surface2, borderRadius:'6px', padding:'2px 8px', color:C.gold, fontWeight:600 }}>
+          {tipoArq==='movimentacao' ? 'Movimentação' : 'Negociações'}
+        </span>
+        {rendimentos.length>0 && <span>{rendimentos.length} rendimento(s) · {carteira.length} operação(ões)</span>}
+        {rendimentos.length===0 && <span>{linhas.length} lançamento(s)</span>}
+      </div>
 
-      <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.muted, marginBottom:'12px' }}>
-        <IcoWallet/><span style={{ fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em' }}>Carteira · {carteira.length} operações</span>
-      </div>
-      <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden', marginBottom:'12px' }}>
-        {carteira.length===0
-          ? <div style={{ padding:'20px', textAlign:'center', color:C.muted, fontSize:'13px' }}>Nenhuma operação de carteira</div>
-          : carteira.map((l,i)=>(
-            <div key={i} style={{ padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:i<carteira.length-1?`1px solid ${C.border}`:'none' }}>
-              <div>
-                <span className="num" style={{ fontWeight:600, fontSize:'13px' }}>{l.codigo}</span>
-                <span style={{ color:C.muted, fontSize:'12px', marginLeft:'8px' }}>{l.data} · {l.qtd}x {fmt(l.preco)}</span>
+      {/* ── Rendimentos de FII (só no arquivo de Movimentação) ── */}
+      {rendimentos.length>0 && (
+        <React.Fragment>
+          <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.muted, marginBottom:'12px' }}>
+            <span>💰</span><span style={{ fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em' }}>Rendimentos FII · {rendimentos.length} lançamento(s)</span>
+          </div>
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden', marginBottom:'12px' }}>
+            {rendimentos.map((p,i)=>(
+              <div key={i} style={{ padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:i<rendimentos.length-1?`1px solid ${C.border}`:'none' }}>
+                <div>
+                  <span className="num" style={{ fontWeight:600, fontSize:'13px' }}>{p.codigo}</span>
+                  <span style={{ color:C.muted, fontSize:'12px', marginLeft:'8px' }}>{p.data} · {p.qtd} cotas × {fmt(p.valorCota)}</span>
+                </div>
+                <span className="num" style={{ fontSize:'13px', fontWeight:600, color:C.green }}>{fmt(p.total)}</span>
               </div>
-              <span className="num" style={{ fontSize:'12px', fontWeight:600, color:l.tipo==='Compra'?C.green:C.red }}>{l.tipo==='Compra'?'−':'+'}  {fmt(l.valor)}</span>
-            </div>
-          ))
-        }
-      </div>
-      {carteira.length>0 && (
-        <button onClick={salvarCarteira} disabled={savingC||savedC} style={{ width:'100%', marginBottom:'24px', borderRadius:'10px', padding:'12px', background:savedC?C.surface2:C.gold, color:savedC?C.green:'#1A1206', border:'none', fontSize:'14px', fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
-          {savedC?<><IcoCheck/> Operações salvas na carteira</>:savingC?'Salvando...':`Salvar ${carteira.length} operações na carteira`}
-        </button>
+            ))}
+          </div>
+          <button onClick={salvarRendimentos} disabled={savingP||savedP} style={{ width:'100%', marginBottom:'24px', borderRadius:'10px', padding:'12px', background:savedP?C.surface2:C.green, color:savedP?C.green:'#0D1F0D', border:savedP?`1px solid ${C.green}`:'none', fontSize:'14px', fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
+            {savedP?<><IcoCheck/> Rendimentos salvos nos proventos!</>:savingP?'Salvando...': `Salvar ${rendimentos.length} rendimentos nos proventos`}
+          </button>
+        </React.Fragment>
       )}
 
+      {/* ── Operações de carteira ── */}
+      {carteira.length>0 && (
+        <React.Fragment>
+          <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.muted, marginBottom:'12px' }}>
+            <IcoWallet/><span style={{ fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em' }}>Carteira · {carteira.length} operações</span>
+          </div>
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden', marginBottom:'12px' }}>
+            {carteira.map((l,i)=>(
+              <div key={i} style={{ padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:i<carteira.length-1?`1px solid ${C.border}`:'none' }}>
+                <div>
+                  <span className="num" style={{ fontWeight:600, fontSize:'13px' }}>{l.codigo}</span>
+                  <span style={{ color:C.muted, fontSize:'12px', marginLeft:'8px' }}>{l.data} · {l.qtd}x {fmt(l.preco)}</span>
+                </div>
+                <span className="num" style={{ fontSize:'12px', fontWeight:600, color:l.tipo==='Compra'?C.green:C.red }}>{l.tipo==='Compra'?'−':'+'}  {fmt(l.valor)}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={salvarCarteira} disabled={savingC||savedC} style={{ width:'100%', marginBottom:'24px', borderRadius:'10px', padding:'12px', background:savedC?C.surface2:C.gold, color:savedC?C.green:'#1A1206', border:'none', fontSize:'14px', fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
+            {savedC?<><IcoCheck/> Operações salvas na carteira</>:savingC?'Salvando...':`Salvar ${carteira.length} operações na carteira`}
+          </button>
+        </React.Fragment>
+      )}
+
+      {/* ── Day Trade / Futuros ── */}
       {futuros.length>0 && (
         <React.Fragment>
           <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.muted, marginBottom:'12px' }}>
@@ -715,7 +822,13 @@ function TabExtratoXLSX({ user }) {
         </React.Fragment>
       )}
 
-      <button onClick={()=>{setLinhas(null);setExpandMes(null);}} style={{ width:'100%', marginTop:'8px', borderRadius:'10px', padding:'12px', background:'none', border:`1px solid ${C.border}`, color:C.muted, fontSize:'14px', cursor:'pointer' }}>
+      {rendimentos.length===0 && carteira.length===0 && futuros.length===0 && (
+        <div style={{ padding:'32px 20px', textAlign:'center', color:C.muted, fontSize:'13px' }}>
+          Nenhum lançamento encontrado neste arquivo.
+        </div>
+      )}
+
+      <button onClick={()=>{setLinhas(null);setRendimentos([]);setExpandMes(null);}} style={{ width:'100%', marginTop:'8px', borderRadius:'10px', padding:'12px', background:'none', border:`1px solid ${C.border}`, color:C.muted, fontSize:'14px', cursor:'pointer' }}>
         Importar outro arquivo
       </button>
     </div>
