@@ -163,6 +163,232 @@ function tickerForQuote(codigo) {
 
 const fmtDataBR = iso => { if(!iso) return '-'; const [y,m,d]=String(iso).split('-'); return `${d}/${m}/${y}`; };
 
+// ── Gráfico de barras SVG simples ────────────────────────────────────────────
+function BarChart({ data, height=110, color, relative=false }) {
+  if (!data || data.length===0) return null;
+  const col = color || C.gold;
+  const vals = data.map(d=>d.value);
+  const minVal = relative ? Math.min(...vals)*0.99 : 0;
+  const maxVal = Math.max(...vals, 0.01);
+  const range = maxVal - minVal || 0.01;
+  const chartH = height - 20;
+  const w = 100/data.length;
+  return (
+    <svg width="100%" height={height} style={{ display:'block', overflow:'visible' }}>
+      {data.map((d,i)=>{
+        const barH = Math.max(2, ((d.value-minVal)/range)*chartH);
+        const x = i*w;
+        const isLast = i===data.length-1;
+        return (
+          <g key={i}>
+            <rect x={`${x+w*0.12}%`} y={chartH-barH} width={`${w*0.76}%`} height={barH}
+              fill={isLast ? C.green : col} rx={2} opacity={0.9} />
+            <text x={`${x+w/2}%`} y={height-4} textAnchor="middle" fontSize={8}
+              fill={C.muted} fontFamily="Inter,sans-serif">{d.label}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ── Histórico de Proventos (overlay) ─────────────────────────────────────────
+function ProventosHistorico({ proventos, onClose }) {
+  const [expandMes, setExpandMes] = useState(null);
+  const mesesMap = {};
+  proventos.forEach(p=>{
+    const mk=p.data.slice(0,7);
+    if(!mesesMap[mk]) mesesMap[mk]={total:0,items:[]};
+    mesesMap[mk].total=Math.round((mesesMap[mk].total+p.total)*100)/100;
+    mesesMap[mk].items.push(p);
+  });
+  const mesesOrd = Object.entries(mesesMap).sort((a,b)=>a[0]<b[0]?-1:1);
+  const chartData = mesesOrd.slice(-12).map(([mk,info])=>({
+    label:nMs[parseInt(mk.split('-')[1])-1], value:info.total
+  }));
+  const totalGeral = proventos.reduce((s,p)=>s+p.total,0);
+  const mediaMensal = mesesOrd.length ? totalGeral/mesesOrd.length : 0;
+  const melhor = mesesOrd.reduce((b,[mk,i])=>i.total>(b[1]?.total||0)?[mk,i]:b, ['',{total:0}]);
+
+  return (
+    <div style={{ background:C.bg, minHeight:'100vh', padding:'16px 16px 100px' }}>
+      <div style={{ maxWidth:'480px', margin:'0 auto' }}>
+        <button onClick={onClose} style={{ background:'none', border:'none', color:C.muted, fontSize:'13px', cursor:'pointer', marginBottom:'12px', display:'flex', alignItems:'center', gap:'4px', padding:0 }}>← Voltar</button>
+        <div style={{ color:C.gold, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:'4px' }}>Proventos · Histórico</div>
+        <div className="num display" style={{ fontSize:'32px', fontWeight:600, marginBottom:'4px' }}>{fmt(totalGeral)}</div>
+        <div style={{ fontSize:'12px', color:C.muted, marginBottom:'20px' }}>Total recebido em {mesesOrd.length} mês(es)</div>
+
+        {chartData.length>1 && (
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'16px', marginBottom:'16px' }}>
+            <div style={{ fontSize:'11px', color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'12px' }}>Evolução mensal</div>
+            <BarChart data={chartData} height={110} />
+          </div>
+        )}
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'20px' }}>
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px' }}>
+            <div style={{ fontSize:'10px', color:C.muted, textTransform:'uppercase', marginBottom:'4px' }}>Média mensal</div>
+            <div className="num" style={{ fontSize:'16px', fontWeight:600, color:C.gold }}>{fmt(mediaMensal)}</div>
+          </div>
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px' }}>
+            <div style={{ fontSize:'10px', color:C.muted, textTransform:'uppercase', marginBottom:'4px' }}>Melhor mês</div>
+            <div className="num" style={{ fontSize:'16px', fontWeight:600, color:C.green }}>{fmt(melhor[1].total)}</div>
+            <div style={{ fontSize:'10px', color:C.muted }}>{melhor[0]?nomeMes(melhor[0]):'-'}</div>
+          </div>
+        </div>
+
+        <div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:'8px' }}>Por mês</div>
+        <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+          {[...mesesOrd].reverse().map(([mk,info])=>{
+            const open=expandMes===mk;
+            return (
+              <div key={mk} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden' }}>
+                <button onClick={()=>setExpandMes(open?null:mk)} style={{ width:'100%', padding:'12px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', background:'none', border:'none', cursor:'pointer', color:C.text }}>
+                  <span style={{ fontWeight:500, fontSize:'14px' }}>{nomeMes(mk)}</span>
+                  <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                    <span className="num" style={{ fontWeight:600, color:C.green }}>{fmt(info.total)}</span>
+                    {open?<IcoUp/>:<IcoDown/>}
+                  </div>
+                </button>
+                {open && (
+                  <div style={{ borderTop:`1px solid ${C.border}` }}>
+                    {info.items.sort((a,b)=>a.data<b.data?1:-1).map((p,i)=>(
+                      <div key={i} style={{ padding:'8px 16px', display:'flex', justifyContent:'space-between', fontSize:'12px', borderBottom:i<info.items.length-1?`1px solid ${C.border}`:'none' }}>
+                        <span style={{ color:C.muted }}><span className="num">{p.codigo}</span> · {fmtDataBR(p.data)}</span>
+                        <span className="num" style={{ color:C.green }}>{fmt(p.total)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Detalhe do Ativo (overlay) ────────────────────────────────────────────────
+function AtivoDetalhe({ posicao, cotacoes, proventos, onClose }) {
+  const [histPreco, setHistPreco] = useState(null);
+
+  useEffect(()=>{
+    const tk = tickerForQuote(posicao.codigo);
+    fetch(`https://brapi.dev/api/quote/${tk}?range=1y&interval=1mo&token=${BRAPI_TOKEN}`)
+      .then(r=>r.json())
+      .then(data=>{
+        const hist = data.results?.[0]?.historicalDataPrice;
+        if (hist && hist.length>1) {
+          setHistPreco(hist.slice(-12).map(h=>({
+            label: new Date(h.date*1000).toLocaleDateString('pt-BR',{month:'short'}).replace('.','').slice(0,3),
+            value: h.close||h.open||0
+          })));
+        }
+      }).catch(()=>{});
+  }, [posicao.codigo]);
+
+  const preco = cotacoes[tickerForQuote(posicao.codigo)];
+  const temPreco = preco!=null;
+  const resultado = temPreco ? (preco-posicao.avg)*posicao.qtd : null;
+  const resultadoPct = temPreco && posicao.avg>0 ? ((preco-posicao.avg)/posicao.avg)*100 : null;
+  const positivo = resultado!=null && resultado>=0;
+  const valorAtual = posicao.qtd*(temPreco?preco:posicao.avg);
+  const investido = posicao.qtd*posicao.avg;
+
+  const meusProvs = proventos.filter(p=>p.codigo===posicao.codigo);
+  const totalProvs = meusProvs.reduce((s,p)=>s+p.total,0);
+  const dyTotal = valorAtual>0 ? (totalProvs/valorAtual)*100 : 0;
+
+  const provMeses = {};
+  meusProvs.forEach(p=>{
+    const mk=p.data.slice(0,7);
+    provMeses[mk]=(provMeses[mk]||0)+p.total;
+  });
+  const provChart = Object.entries(provMeses).sort((a,b)=>a[0]<b[0]?-1:1).slice(-12).map(([mk,v])=>({
+    label:nMs[parseInt(mk.split('-')[1])-1], value:v
+  }));
+
+  return (
+    <div style={{ background:C.bg, minHeight:'100vh', padding:'16px 16px 100px' }}>
+      <div style={{ maxWidth:'480px', margin:'0 auto' }}>
+        <button onClick={onClose} style={{ background:'none', border:'none', color:C.muted, fontSize:'13px', cursor:'pointer', marginBottom:'12px', display:'flex', alignItems:'center', gap:'4px', padding:0 }}>← Voltar</button>
+
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'20px' }}>
+          <div>
+            <div className="num" style={{ fontSize:'30px', fontWeight:700, lineHeight:1 }}>{posicao.codigo}</div>
+            <div style={{ color:C.muted, fontSize:'12px', marginTop:'4px' }}>{posicao.tipoAtivo}</div>
+          </div>
+          {temPreco && (
+            <div style={{ textAlign:'right' }}>
+              <div className="num" style={{ fontSize:'22px', fontWeight:600 }}>{fmt(preco)}</div>
+              <div className="num" style={{ fontSize:'13px', color:positivo?C.green:C.red, display:'flex', alignItems:'center', gap:'4px', justifyContent:'flex-end' }}>
+                {positivo?<IcoUp/>:<IcoDown/>}{Math.abs(resultadoPct).toFixed(2)}%
+              </div>
+            </div>
+          )}
+        </div>
+
+        {histPreco && histPreco.length>1 && (
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'16px', marginBottom:'16px' }}>
+            <div style={{ fontSize:'11px', color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'12px' }}>Cotação · últimos 12 meses</div>
+            <BarChart data={histPreco} height={100} color={C.gold} relative={true} />
+          </div>
+        )}
+
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'16px', marginBottom:'16px' }}>
+          <div style={{ fontSize:'11px', color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'12px' }}>Posição</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+            {[['Quantidade', posicao.qtd, false], ['Preço médio', fmt(posicao.avg), false],
+              ['Investido', fmt(investido), false], ['Atual', temPreco?fmt(valorAtual):'—', false]].map(([lbl,val])=>(
+              <div key={lbl}>
+                <div style={{ fontSize:'10px', color:C.muted, textTransform:'uppercase', marginBottom:'2px' }}>{lbl}</div>
+                <div className="num" style={{ fontSize:'15px', fontWeight:600 }}>{val}</div>
+              </div>
+            ))}
+            {resultado!=null && (
+              <div style={{ gridColumn:'1/-1', borderTop:`1px solid ${C.border}`, paddingTop:'10px' }}>
+                <div style={{ fontSize:'10px', color:C.muted, textTransform:'uppercase', marginBottom:'2px' }}>Resultado</div>
+                <div className="num" style={{ fontSize:'18px', fontWeight:600, color:positivo?C.green:C.red }}>
+                  {positivo?'+':''}{fmt(resultado)} ({positivo?'+':''}{resultadoPct.toFixed(2)}%)
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'16px', marginBottom:'16px' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+            <div style={{ fontSize:'11px', color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em' }}>Proventos recebidos</div>
+            {dyTotal>0 && <div className="num" style={{ fontSize:'12px', color:C.green, fontWeight:600, background:'rgba(74,222,128,0.1)', padding:'2px 8px', borderRadius:'20px' }}>DY acum. {dyTotal.toFixed(1)}%</div>}
+          </div>
+          <div className="num" style={{ fontSize:'24px', fontWeight:700, color:C.green, marginBottom:'4px' }}>{fmt(totalProvs)}</div>
+          <div style={{ fontSize:'12px', color:C.muted, marginBottom: provChart.length>1?'14px':'0' }}>{meusProvs.length} pagamento(s)</div>
+          {provChart.length>1 && <BarChart data={provChart} height={90} color={C.green} />}
+          {meusProvs.length===0 && <div style={{ fontSize:'12px', color:C.muted, marginTop:'4px' }}>Nenhum provento lançado para este ativo.</div>}
+        </div>
+
+        {meusProvs.length>0 && (
+          <React.Fragment>
+            <div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:'8px' }}>Histórico de pagamentos</div>
+            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden' }}>
+              {meusProvs.sort((a,b)=>a.data<b.data?1:-1).map((p,i)=>(
+                <div key={i} style={{ padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:i<meusProvs.length-1?`1px solid ${C.border}`:'none' }}>
+                  <div>
+                    <div style={{ fontSize:'12px', color:C.muted }}>{fmtDataBR(p.data)} · {p.tipo}</div>
+                    <div style={{ fontSize:'11px', color:C.muted }}>{p.qtd} cotas × {fmt(p.valorCota||0)}</div>
+                  </div>
+                  <div className="num" style={{ fontSize:'14px', fontWeight:600, color:C.green }}>{fmt(p.total)}</div>
+                </div>
+              ))}
+            </div>
+          </React.Fragment>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ user }) {
   const [ops, setOps] = useState([]);
   const [proventos, setProventos] = useState([]);
@@ -170,6 +396,8 @@ function Dashboard({ user }) {
   const [cotacoes, setCotacoes] = useState({});
   const [loadingMercado, setLoadingMercado] = useState(false);
   const [erroMercado, setErroMercado] = useState(null);
+  const [detalheAtivo, setDetalheAtivo] = useState(null);
+  const [showHistorico, setShowHistorico] = useState(false);
 
   useEffect(() => {
     return db.collection('usuarios').doc(user.uid).collection('operacoes')
@@ -225,6 +453,10 @@ function Dashboard({ user }) {
   const totalRecebidoMes = recebidosMes.reduce((s,r)=>s+r.total,0);
 
   const s = { padding:'16px 16px 100px', maxWidth:'600px', margin:'0 auto' };
+  const totalGeralProvs = proventos.reduce((s,p)=>s+p.total,0);
+
+  if (showHistorico) return <ProventosHistorico proventos={proventos} onClose={()=>setShowHistorico(false)} />;
+  if (detalheAtivo) return <AtivoDetalhe posicao={detalheAtivo} cotacoes={cotacoes} proventos={proventos} onClose={()=>setDetalheAtivo(null)} />;
 
   return (
     <div style={{ background:C.bg, minHeight:'100vh' }}>
@@ -240,7 +472,7 @@ function Dashboard({ user }) {
           )}
         </div>
 
-        {loadingMercado && <div style={{ fontSize:'12px', color:C.muted, marginBottom:'12px' }}>Buscando cotações e dividendos...</div>}
+        {loadingMercado && <div style={{ fontSize:'12px', color:C.muted, marginBottom:'12px' }}>Buscando cotações...</div>}
         {erroMercado && (
           <div style={{ background:'rgba(248,113,113,0.08)', border:`1px solid ${C.red}`, color:C.red, borderRadius:'10px', padding:'10px 12px', marginBottom:'16px', fontSize:'12px', display:'flex', gap:'8px', alignItems:'flex-start' }}>
             <IcoAlert/>{erroMercado}
@@ -249,24 +481,28 @@ function Dashboard({ user }) {
 
         {posicoes.length>0 && (
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'24px' }}>
+            {/* Card total geral */}
             <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px' }}>
-              <div style={{ color:C.muted, fontSize:'10px', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'6px' }}>Recebido (30d)</div>
-              <div className="num" style={{ fontSize:'18px', fontWeight:600, color:C.green, marginBottom:'8px' }}>{fmt(totalRecebido30d)}</div>
-              {recebidos30d.slice(0,4).map((r,i)=>(
-                <div key={i} style={{ display:'flex', justifyContent:'space-between', fontSize:'11px', color:C.muted, marginBottom:'2px' }}>
+              <div style={{ color:C.muted, fontSize:'10px', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'6px' }}>Total em proventos</div>
+              <div className="num" style={{ fontSize:'18px', fontWeight:600, color:C.green, marginBottom:'6px' }}>{fmt(totalGeralProvs)}</div>
+              <div style={{ fontSize:'11px', color:C.muted, marginBottom:'2px' }}>Últimos 30d: <span className="num" style={{ color:C.green }}>{fmt(totalRecebido30d)}</span></div>
+              {recebidos30d.slice(0,3).map((r,i)=>(
+                <div key={i} style={{ display:'flex', justifyContent:'space-between', fontSize:'10px', color:C.muted, marginTop:'2px' }}>
                   <span className="num">{r.codigo} · {fmtDataBR(r.data)}</span>
                   <span className="num">{fmt(r.total)}</span>
                 </div>
               ))}
-              {recebidos30d.length===0 && <div style={{ fontSize:'11px', color:C.muted }}>Nenhum lançado nos últimos 30 dias</div>}
             </div>
-            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px' }}>
-              <div style={{ color:C.muted, fontSize:'10px', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'6px' }}>Total no mês</div>
-              <div className="num" style={{ fontSize:'18px', fontWeight:600, color:C.gold, marginBottom:'8px' }}>{fmt(totalRecebidoMes)}</div>
-              <div style={{ fontSize:'11px', color:C.muted, lineHeight:'1.5' }}>
-                {recebidosMes.length>0 ? `${recebidosMes.length} provento(s) lançado(s) este mês` : 'Lance seus proventos em "Lançar → Provento"'}
+            {/* Card mês atual — clicável */}
+            <button onClick={()=>setShowHistorico(true)} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px', cursor:'pointer', textAlign:'left' }}>
+              <div style={{ color:C.muted, fontSize:'10px', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'6px', display:'flex', justifyContent:'space-between' }}>
+                <span>Total no mês</span><span style={{ color:C.gold }}>▸</span>
               </div>
-            </div>
+              <div className="num" style={{ fontSize:'18px', fontWeight:600, color:C.gold, marginBottom:'6px' }}>{fmt(totalRecebidoMes)}</div>
+              <div style={{ fontSize:'11px', color:C.muted, lineHeight:'1.5' }}>
+                {recebidosMes.length>0 ? `${recebidosMes.length} provento(s) este mês` : 'Ver histórico →'}
+              </div>
+            </button>
           </div>
         )}
 
@@ -287,12 +523,15 @@ function Dashboard({ user }) {
             const resultado = temPreco ? (preco-p.avg)*p.qtd : null;
             const resultadoPct = temPreco && p.avg>0 ? ((preco-p.avg)/p.avg)*100 : null;
             const positivo = resultado!=null && resultado>=0;
+            const totalProvTicker = proventos.filter(pv=>pv.codigo===p.codigo).reduce((s,pv)=>s+pv.total,0);
             return (
-              <div key={p.codigo} style={{ padding:'12px 16px', borderBottom:i<posicoes.length-1?`1px solid ${C.border}`:'none' }}>
+              <button key={p.codigo} onClick={()=>setDetalheAtivo(p)}
+                style={{ width:'100%', padding:'12px 16px', borderBottom:i<posicoes.length-1?`1px solid ${C.border}`:'none', background:'none', border:'none', borderBottom:i<posicoes.length-1?`1px solid ${C.border}`:'none', cursor:'pointer', textAlign:'left', color:C.text }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'8px', gap:'8px' }}>
                   <div>
                     <span className="num" style={{ fontWeight:600, fontSize:'14px' }}>{p.codigo}</span>
                     <span style={{ color:C.muted, fontSize:'12px', marginLeft:'8px' }}>{p.tipoAtivo}</span>
+                    {totalProvTicker>0 && <div style={{ fontSize:'11px', color:C.green, marginTop:'2px' }}>💰 {fmt(totalProvTicker)} em proventos</div>}
                   </div>
                   {resultadoPct!=null && (
                     <div style={{ textAlign:'right', flexShrink:0 }}>
@@ -309,13 +548,13 @@ function Dashboard({ user }) {
                   <div style={{ textAlign:'right' }}><div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', marginBottom:'2px' }}>Atual</div><div className="num" style={{ fontSize:'13px' }}>{temPreco?fmt(preco):'—'}</div></div>
                   <div style={{ textAlign:'right' }}><div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', marginBottom:'2px' }}>Total</div><div className="num" style={{ fontSize:'13px' }}>{fmt(p.qtd*(temPreco?preco:p.avg))}</div></div>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
 
         <div style={{ fontSize:'11px', color:C.muted, marginTop:'12px', lineHeight:'1.5' }}>
-          Cotações e dividendos via brapi.dev. "A receber" considera proventos com data-com já confirmada ou estimativa pela posição atual — confira sempre antes de declarar.
+          Cotações via brapi.dev. Toque em um ativo para ver detalhes e histórico de proventos.
         </div>
       </div>
     </div>
