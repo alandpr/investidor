@@ -163,6 +163,14 @@ function tickerForQuote(codigo) {
 
 const fmtDataBR = iso => { if(!iso) return '-'; const [y,m,d]=String(iso).split('-'); return `${d}/${m}/${y}`; };
 
+// ── Helpers compartilhados ───────────────────────────────────────────────────
+const parseNum = v => typeof v==='number'?v:parseFloat(String(v||0).replace(',','.'));
+const toISO = s => { const [d,m,y]=s.split('/'); return `${y}-${m}-${d}`; };
+const parseDataStr = s => { const [d,m,y]=s.split('/'); return new Date(`${y}-${m}-${d}`); };
+const mapTipo = c => /11$/.test(c)?'FII':'Ação';
+const nMs=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+const nomeMes=k=>{const[y,m]=k.split('-');return `${nMs[parseInt(m)-1]}/${y}`;};
+
 // ── Gráfico de barras SVG simples ────────────────────────────────────────────
 function BarChart({ data, height=110, color, relative=false }) {
   if (!data || data.length===0) return null;
@@ -307,7 +315,7 @@ function AtivoDetalhe({ posicao, cotacoes, proventos, fiiCadastro, onClose }) {
 
   // Notícias via Google News RSS proxy
   useEffect(()=>{
-    const q = encodeURIComponent(`${posicao.codigo} ${ehFII?'fundo imobiliário':'ação'}`);
+    const q = encodeURIComponent(posicao.codigo + (ehFII?' fundo imobiliario':' acao'));
     const rss = encodeURIComponent(`https://news.google.com/rss/search?q=${q}&hl=pt-BR&gl=BR&ceid=BR:pt`);
     fetch(`https://api.rss2json.com/v1/api.json?rss_url=${rss}&count=5`)
       .then(r=>r.json())
@@ -423,7 +431,7 @@ function AtivoDetalhe({ posicao, cotacoes, proventos, fiiCadastro, onClose }) {
                 ['Segmento', dadosFundo.segment || dadosFundo.segmentName],
                 ['Gestora', dadosFundo.fundManager || dadosFundo.gestora],
                 ['Administradora', dadosFundo.administrator || dadosFundo.admin],
-              ].filter(([,v])=>v).map(([lbl,val])=>(
+              ].filter(([k,v])=>v).map(([lbl,val])=>(
                 <div key={lbl} style={{ display:'flex', justifyContent:'space-between', marginBottom:'8px', fontSize:'13px' }}>
                   <span style={{ color:C.muted }}>{lbl}</span>
                   <span style={{ fontWeight:500, textAlign:'right', maxWidth:'60%' }}>{val}</span>
@@ -916,12 +924,6 @@ function LancarOperacao({ user }) {
 }
 
 // ── Importar Extrato ────────────────────────────────────────────────────────
-const parseNum = v => typeof v==='number'?v:parseFloat(String(v||0).replace(',','.'));
-const toISO = s => { const [d,m,y]=s.split('/'); return `${y}-${m}-${d}`; };
-const parseDataStr = s => { const [d,m,y]=s.split('/'); return new Date(`${y}-${m}-${d}`); };
-const mapTipo = c => /11$/.test(c)?'FII':'Ação';
-const nMs=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
-const nomeMes=k=>{const[y,m]=k.split('-');return `${nMs[parseInt(m)-1]}/${y}`;};
 
 function TabBtn({active, onClick, children}) {
   return (
