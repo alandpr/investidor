@@ -270,9 +270,17 @@ function ProventosHistorico({ proventos, onClose }) {
 }
 
 // ── Detalhe do Ativo (overlay) ────────────────────────────────────────────────
-function AtivoDetalhe({ posicao, cotacoes, proventos, onClose }) {
+function AtivoDetalhe({ posicao, cotacoes, proventos, fiiCadastro, onClose }) {
   const [histPreco, setHistPreco] = useState(null);
+  const [dadosFundo, setDadosFundo] = useState(null);
+  const [noticias, setNoticias] = useState([]);
+  const [loadingNoticias, setLoadingNoticias] = useState(true);
 
+  const ehFII = posicao.tipoAtivo === 'FII';
+  const cadastro = fiiCadastro?.[posicao.codigo];
+  const cnpjFmt = cadastro?.cnpj ? String(cadastro.cnpj).replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,'$1.$2.$3/$4-$5') : null;
+
+  // Cotação histórica
   useEffect(()=>{
     const tk = tickerForQuote(posicao.codigo);
     fetch(`https://brapi.dev/api/quote/${tk}?range=1y&interval=1mo&token=${BRAPI_TOKEN}`)
@@ -286,6 +294,26 @@ function AtivoDetalhe({ posicao, cotacoes, proventos, onClose }) {
           })));
         }
       }).catch(()=>{});
+  }, [posicao.codigo]);
+
+  // Dados do fundo na B3 (tipo, gestora, site oficial)
+  useEffect(()=>{
+    if (!ehFII) return;
+    fetch(`https://sistemaswebb3-listados.b3.com.br/fundsProxy/fundsCall/GetDetailFundSIG/${posicao.codigo}`)
+      .then(r=>r.json())
+      .then(data=>{ if(data && data.detailFund) setDadosFundo(data.detailFund); })
+      .catch(()=>{});
+  }, [posicao.codigo, ehFII]);
+
+  // Notícias via Google News RSS proxy
+  useEffect(()=>{
+    const q = encodeURIComponent(`${posicao.codigo} ${ehFII?'fundo imobiliário':'ação'}`);
+    const rss = encodeURIComponent(`https://news.google.com/rss/search?q=${q}&hl=pt-BR&gl=BR&ceid=BR:pt`);
+    fetch(`https://api.rss2json.com/v1/api.json?rss_url=${rss}&count=5`)
+      .then(r=>r.json())
+      .then(data=>{ if(data.items) setNoticias(data.items.slice(0,5)); })
+      .catch(()=>{})
+      .finally(()=>setLoadingNoticias(false));
   }, [posicao.codigo]);
 
   const preco = cotacoes[tickerForQuote(posicao.codigo)];
@@ -371,7 +399,7 @@ function AtivoDetalhe({ posicao, cotacoes, proventos, onClose }) {
         {meusProvs.length>0 && (
           <React.Fragment>
             <div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:'8px' }}>Histórico de pagamentos</div>
-            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden' }}>
+            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden', marginBottom:'16px' }}>
               {meusProvs.sort((a,b)=>a.data<b.data?1:-1).map((p,i)=>(
                 <div key={i} style={{ padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:i<meusProvs.length-1?`1px solid ${C.border}`:'none' }}>
                   <div>
@@ -384,6 +412,85 @@ function AtivoDetalhe({ posicao, cotacoes, proventos, onClose }) {
             </div>
           </React.Fragment>
         )}
+
+        {/* ── Dados do fundo (B3) — só FII ── */}
+        {ehFII && dadosFundo && (
+          <React.Fragment>
+            <div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:'8px' }}>Sobre o fundo</div>
+            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'16px', marginBottom:'16px' }}>
+              {[
+                ['Tipo', dadosFundo.typeFund || dadosFundo.type],
+                ['Segmento', dadosFundo.segment || dadosFundo.segmentName],
+                ['Gestora', dadosFundo.fundManager || dadosFundo.gestora],
+                ['Administradora', dadosFundo.administrator || dadosFundo.admin],
+              ].filter(([,v])=>v).map(([lbl,val])=>(
+                <div key={lbl} style={{ display:'flex', justifyContent:'space-between', marginBottom:'8px', fontSize:'13px' }}>
+                  <span style={{ color:C.muted }}>{lbl}</span>
+                  <span style={{ fontWeight:500, textAlign:'right', maxWidth:'60%' }}>{val}</span>
+                </div>
+              ))}
+            </div>
+          </React.Fragment>
+        )}
+
+        {/* ── Links úteis ── */}
+        {ehFII && (
+          <React.Fragment>
+            <div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:'8px' }}>Documentos e links</div>
+            <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'16px' }}>
+              {dadosFundo?.webSite && (
+                <a href={dadosFundo.webSite.startsWith('http')?dadosFundo.webSite:'https://'+dadosFundo.webSite}
+                   target="_blank" rel="noreferrer"
+                   style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:C.surface, border:`1px solid ${C.gold}`, borderRadius:'10px', padding:'12px 16px', textDecoration:'none', color:C.text }}>
+                  <span style={{ fontSize:'13px', fontWeight:600 }}>🏠 Site oficial do fundo</span>
+                  <span style={{ color:C.gold, fontSize:'12px' }}>→ relatórios, portfólio</span>
+                </a>
+              )}
+              {cnpjFmt && (
+                <a href={`https://www.rad.cvm.gov.br/ENET/frmConsultaExternaCVM.aspx?Tipo=&datInicio=&datFim=&nome=&CodCVM=&CNPJ=${encodeURIComponent(cnpjFmt)}&SIT=A&NumberPage=1`}
+                   target="_blank" rel="noreferrer"
+                   style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px 16px', textDecoration:'none', color:C.text }}>
+                  <span style={{ fontSize:'13px', fontWeight:600 }}>📋 Documentos na CVM</span>
+                  <span style={{ color:C.muted, fontSize:'12px' }}>→ fatos relevantes</span>
+                </a>
+              )}
+              <a href={`https://www.fundsexplorer.com.br/funds/${posicao.codigo.toLowerCase()}`}
+                 target="_blank" rel="noreferrer"
+                 style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px 16px', textDecoration:'none', color:C.text }}>
+                <span style={{ fontSize:'13px', fontWeight:600 }}>📊 Funds Explorer</span>
+                <span style={{ color:C.muted, fontSize:'12px' }}>→ vacância, portfólio</span>
+              </a>
+              <a href={`https://statusinvest.com.br/fundos-imobiliarios/${posicao.codigo.toLowerCase()}`}
+                 target="_blank" rel="noreferrer"
+                 style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px 16px', textDecoration:'none', color:C.text }}>
+                <span style={{ fontSize:'13px', fontWeight:600 }}>📈 Status Invest</span>
+                <span style={{ color:C.muted, fontSize:'12px' }}>→ indicadores, histórico</span>
+              </a>
+            </div>
+          </React.Fragment>
+        )}
+
+        {/* ── Notícias ── */}
+        <div style={{ color:C.muted, fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:'8px' }}>Notícias recentes</div>
+        {loadingNoticias && <div style={{ fontSize:'12px', color:C.muted, marginBottom:'16px' }}>Buscando notícias...</div>}
+        {!loadingNoticias && noticias.length===0 && (
+          <div style={{ fontSize:'12px', color:C.muted, marginBottom:'16px' }}>Nenhuma notícia encontrada.</div>
+        )}
+        {!loadingNoticias && noticias.length>0 && (
+          <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'16px' }}>
+            {noticias.map((n,i)=>(
+              <a key={i} href={n.link} target="_blank" rel="noreferrer"
+                 style={{ display:'block', background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px 16px', textDecoration:'none', color:C.text }}>
+                <div style={{ fontSize:'13px', fontWeight:500, lineHeight:'1.4', marginBottom:'6px' }}>{n.title}</div>
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:'11px', color:C.muted }}>
+                  <span>{n.author||n.source_name||''}</span>
+                  <span>{new Date(n.pubDate).toLocaleDateString('pt-BR')}</span>
+                </div>
+              </a>
+            ))}
+          </div>
+        )}
+
       </div>
     </div>
   );
@@ -398,6 +505,7 @@ function Dashboard({ user }) {
   const [erroMercado, setErroMercado] = useState(null);
   const [detalheAtivo, setDetalheAtivo] = useState(null);
   const [showHistorico, setShowHistorico] = useState(false);
+  const [fiiCadastro, setFiiCadastro] = useState({});
 
   useEffect(() => {
     return db.collection('usuarios').doc(user.uid).collection('operacoes')
@@ -408,6 +516,15 @@ function Dashboard({ user }) {
   useEffect(() => {
     return db.collection('usuarios').doc(user.uid).collection('proventos')
       .onSnapshot(snap => setProventos(snap.docs.map(d=>d.data())), ()=>{});
+  }, [user.uid]);
+
+  useEffect(() => {
+    return db.collection('usuarios').doc(user.uid).collection('fii_cadastro')
+      .onSnapshot(snap => {
+        const m = {};
+        snap.docs.forEach(d => { m[d.id] = d.data(); });
+        setFiiCadastro(m);
+      }, ()=>{});
   }, [user.uid]);
 
   const posicoes = calcPosicoes(ops);
@@ -456,7 +573,7 @@ function Dashboard({ user }) {
   const totalGeralProvs = proventos.reduce((s,p)=>s+p.total,0);
 
   if (showHistorico) return <ProventosHistorico proventos={proventos} onClose={()=>setShowHistorico(false)} />;
-  if (detalheAtivo) return <AtivoDetalhe posicao={detalheAtivo} cotacoes={cotacoes} proventos={proventos} onClose={()=>setDetalheAtivo(null)} />;
+  if (detalheAtivo) return <AtivoDetalhe posicao={detalheAtivo} cotacoes={cotacoes} proventos={proventos} fiiCadastro={fiiCadastro} onClose={()=>setDetalheAtivo(null)} />;
 
   return (
     <div style={{ background:C.bg, minHeight:'100vh' }}>
@@ -526,7 +643,7 @@ function Dashboard({ user }) {
             const totalProvTicker = proventos.filter(pv=>pv.codigo===p.codigo).reduce((s,pv)=>s+pv.total,0);
             return (
               <button key={p.codigo} onClick={()=>setDetalheAtivo(p)}
-                style={{ width:'100%', padding:'12px 16px', borderBottom:i<posicoes.length-1?`1px solid ${C.border}`:'none', background:'none', border:'none', borderBottom:i<posicoes.length-1?`1px solid ${C.border}`:'none', cursor:'pointer', textAlign:'left', color:C.text }}>
+                style={{ width:'100%', padding:'12px 16px 12px 16px', borderBottom:i<posicoes.length-1?`1px solid ${C.border}`:'none', background:'none', border:'none', cursor:'pointer', textAlign:'left', color:C.text, display:'block' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'8px', gap:'8px' }}>
                   <div>
                     <span className="num" style={{ fontWeight:600, fontSize:'14px' }}>{p.codigo}</span>
