@@ -454,14 +454,12 @@ function AtivoDetalhe({ posicao, cotacoes, proventos, fiiCadastro, onClose }) {
                   <span style={{ color:C.gold, fontSize:'12px' }}>→ relatórios, portfólio</span>
                 </a>
               )}
-              {cnpjFmt && (
-                <a href={`https://www.rad.cvm.gov.br/ENET/frmConsultaExternaCVM.aspx?Tipo=&datInicio=&datFim=&nome=&CodCVM=&CNPJ=${encodeURIComponent(cnpjFmt)}&SIT=A&NumberPage=1`}
-                   target="_blank" rel="noreferrer"
-                   style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px 16px', textDecoration:'none', color:C.text }}>
-                  <span style={{ fontSize:'13px', fontWeight:600 }}>📋 Documentos na CVM</span>
-                  <span style={{ color:C.muted, fontSize:'12px' }}>→ fatos relevantes</span>
-                </a>
-              )}
+              <a href={`https://www.rad.cvm.gov.br/ENET/frmConsultaExternaCVM.aspx?nome=${posicao.codigo}&SIT=A`}
+                 target="_blank" rel="noreferrer"
+                 style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px 16px', textDecoration:'none', color:C.text }}>
+                <span style={{ fontSize:'13px', fontWeight:600 }}>📋 Documentos na CVM</span>
+                <span style={{ color:C.muted, fontSize:'12px' }}>→ toque em Consultar</span>
+              </a>
               <a href={`https://www.fundsexplorer.com.br/funds/${posicao.codigo.toLowerCase()}`}
                  target="_blank" rel="noreferrer"
                  style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px 16px', textDecoration:'none', color:C.text }}>
