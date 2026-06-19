@@ -454,6 +454,12 @@ function AtivoDetalhe({ posicao, cotacoes, proventos, fiiCadastro, onClose }) {
                   <span style={{ color:C.gold, fontSize:'12px' }}>→ relatórios, portfólio</span>
                 </a>
               )}
+              <a href={`https://www.reidosdividendos.com.br/fiis/${posicao.codigo.toUpperCase()}/portfolio`}
+                 target="_blank" rel="noreferrer"
+                 style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:C.surface, border:`1px solid ${C.gold}`, borderRadius:'10px', padding:'12px 16px', textDecoration:'none', color:C.text }}>
+                <span style={{ fontSize:'13px', fontWeight:600 }}>🏢 Portfólio de imóveis</span>
+                <span style={{ color:C.gold, fontSize:'12px' }}>→ vacância, contratos</span>
+              </a>
               <a href={`https://www.rad.cvm.gov.br/ENET/frmConsultaExternaCVM.aspx?nome=${posicao.codigo}&SIT=A`}
                  target="_blank" rel="noreferrer"
                  style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px 16px', textDecoration:'none', color:C.text }}>
@@ -464,7 +470,7 @@ function AtivoDetalhe({ posicao, cotacoes, proventos, fiiCadastro, onClose }) {
                  target="_blank" rel="noreferrer"
                  style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px 16px', textDecoration:'none', color:C.text }}>
                 <span style={{ fontSize:'13px', fontWeight:600 }}>📊 Funds Explorer</span>
-                <span style={{ color:C.muted, fontSize:'12px' }}>→ vacância, portfólio</span>
+                <span style={{ color:C.muted, fontSize:'12px' }}>→ indicadores gerais</span>
               </a>
               <a href={`https://statusinvest.com.br/fundos-imobiliarios/${posicao.codigo.toLowerCase()}`}
                  target="_blank" rel="noreferrer"
@@ -633,13 +639,15 @@ function Dashboard({ user }) {
           <IcoWallet/><span style={{ fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.1em' }}>Posições</span>
         </div>
 
-        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', overflow:'hidden' }}>
-          {loading && <div style={{ padding:'32px', textAlign:'center', color:C.muted, fontSize:'14px' }}>Carregando...</div>}
-          {!loading && posicoes.length===0 && (
-            <div style={{ padding:'40px 24px', textAlign:'center', color:C.muted, fontSize:'14px', lineHeight:'1.6' }}>
-              Nenhuma posição ainda.<br/>Lance operações ou importe um extrato.
-            </div>
-          )}
+        {loading && (
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'32px', textAlign:'center', color:C.muted, fontSize:'14px' }}>Carregando...</div>
+        )}
+        {!loading && posicoes.length===0 && (
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', padding:'40px 24px', textAlign:'center', color:C.muted, fontSize:'14px', lineHeight:'1.6' }}>
+            Nenhuma posição ainda.<br/>Lance operações ou importe um extrato.
+          </div>
+        )}
+        <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
           {posicoes.map((p,i) => {
             const preco = cotacoes[tickerForQuote(p.codigo)];
             const temPreco = preco!=null;
@@ -649,10 +657,10 @@ function Dashboard({ user }) {
             const totalProvTicker = proventos.filter(pv=>pv.codigo===p.codigo).reduce((s,pv)=>s+pv.total,0);
             return (
               <button key={p.codigo} onClick={()=>setDetalheAtivo(p)}
-                style={{ width:'100%', padding:'12px 16px 12px 16px', borderBottom:i<posicoes.length-1?`1px solid ${C.border}`:'none', background:'none', border:'none', cursor:'pointer', textAlign:'left', color:C.text, display:'block' }}>
+                style={{ width:'100%', padding:'14px 16px', background:C.surface, border:`1px solid ${C.border}`, borderRadius:'12px', cursor:'pointer', textAlign:'left', color:C.text, display:'block' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'8px', gap:'8px' }}>
                   <div>
-                    <span className="num" style={{ fontWeight:600, fontSize:'14px' }}>{p.codigo}</span>
+                    <span className="num" style={{ fontWeight:700, fontSize:'15px' }}>{p.codigo}</span>
                     <span style={{ color:C.muted, fontSize:'12px', marginLeft:'8px' }}>{p.tipoAtivo}</span>
                     {totalProvTicker>0 && <div style={{ fontSize:'11px', color:C.green, marginTop:'2px' }}>💰 {fmt(totalProvTicker)} em proventos</div>}
                   </div>
