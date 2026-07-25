@@ -1208,9 +1208,11 @@ function TabExtratoXLSX({ user }) {
 }
 
 // ── Leitura de notas de corretagem em PDF ───────────────────────────────────
-async function parseNotaPDF(file) {
+async function parseNotaPDF(file, senha) {
   const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const loadParams = { data: buf };
+  if (senha) loadParams.password = senha;
+  const pdf = await pdfjsLib.getDocument(loadParams).promise;
   let text = '';
   for (let i=1; i<=pdf.numPages; i++) {
     const page = await pdf.getPage(i);
@@ -1284,6 +1286,7 @@ function TabNotasPDF({ user }) {
   const [erro, setErro] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [senha, setSenha] = useState('');
 
   const handleFiles = async files => {
     setErro(null); setLendo(true); setSaved(false);
@@ -1291,10 +1294,15 @@ function TabNotasPDF({ user }) {
       const novos = [];
       for (const f of files) {
         try {
-          const parsed = await parseNotaPDF(f);
+          const parsed = await parseNotaPDF(f, senha||undefined);
           novos.push({ nome:f.name, ...parsed });
-        } catch {
-          novos.push({ nome:f.name, data:'', codigo:'', resultado:0 });
+        } catch(e) {
+          const msg = String(e?.message||'');
+          if (/password/i.test(msg)) {
+            novos.push({ nome:f.name, data:'', codigo:'', resultado:0, corretora:'', erro:'senha' });
+          } else {
+            novos.push({ nome:f.name, data:'', codigo:'', resultado:0, corretora:'' });
+          }
         }
       }
       setItens(prev=>[...prev, ...novos]);
@@ -1325,6 +1333,21 @@ function TabNotasPDF({ user }) {
 
   return (
     <div>
+      <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px', marginBottom:'12px' }}>
+        <div style={{ fontSize:'11px', color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:'6px' }}>Senha do PDF (Rico)</div>
+        <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+          <input
+            value={senha}
+            onChange={e=>setSenha(e.target.value.replace(/\D/g,'').slice(0,6))}
+            placeholder="3 últimos dígitos do CPF"
+            maxLength={6}
+            style={{ background:C.surface2, border:`1px solid ${C.border}`, color:C.text, borderRadius:'8px', padding:'10px 12px', fontSize:'14px', fontFamily:"'IBM Plex Mono',monospace", flex:1 }}
+          />
+          {senha && <span style={{ fontSize:'11px', color:C.green }}>✓ definida</span>}
+        </div>
+        <div style={{ fontSize:'11px', color:C.muted, marginTop:'6px' }}>PDFs da Genial não têm senha — deixe em branco. A senha fica só nesta tela e não é salva.</div>
+      </div>
+
       <label style={{ display:'block', background:C.surface, border:`2px dashed ${C.border}`, borderRadius:'12px', padding:'32px 24px', textAlign:'center', cursor:'pointer', marginBottom:'16px' }}>
         <input type="file" accept="application/pdf" multiple style={{ display:'none' }} onChange={e=>e.target.files?.length && handleFiles(Array.from(e.target.files))} />
         <div style={{ fontSize:'36px', marginBottom:'12px' }}>📄</div>
@@ -1340,11 +1363,15 @@ function TabNotasPDF({ user }) {
           <div style={{ color:C.muted, fontSize:'12px', marginBottom:'8px' }}>Confira os dados extraídos antes de salvar:</div>
           <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'16px' }}>
             {itens.map((it,i)=>(
-              <div key={i} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px' }}>
+              <div key={i} style={{ background:C.surface, border:`1px solid ${it.erro?C.red:C.border}`, borderRadius:'10px', padding:'12px' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
                   <div style={{ fontSize:'11px', color:C.muted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>{it.nome}</div>
-                  {it.corretora && <span style={{ fontSize:'10px', fontWeight:600, background:it.corretora==='Rico'?'rgba(255,102,0,0.15)':'rgba(217,168,92,0.15)', color:it.corretora==='Rico'?'#FF6600':C.gold, borderRadius:'4px', padding:'2px 6px', marginLeft:'8px', flexShrink:0 }}>{it.corretora}</span>}
+                  {it.erro==='senha' && <span style={{ fontSize:'10px', fontWeight:600, background:'rgba(248,113,113,0.15)', color:C.red, borderRadius:'4px', padding:'2px 6px', marginLeft:'8px', flexShrink:0 }}>senha incorreta</span>}
+                  {it.corretora && !it.erro && <span style={{ fontSize:'10px', fontWeight:600, background:it.corretora==='Rico'?'rgba(255,102,0,0.15)':'rgba(217,168,92,0.15)', color:it.corretora==='Rico'?'#FF6600':C.gold, borderRadius:'4px', padding:'2px 6px', marginLeft:'8px', flexShrink:0 }}>{it.corretora}</span>}
                 </div>
+                {it.erro==='senha' ? (
+                  <div style={{ fontSize:'12px', color:C.red }}>Informe a senha correta no campo acima e importe novamente.</div>
+                ) : (
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr auto', gap:'6px', alignItems:'end' }}>
                   <div>
                     <div style={{ fontSize:'10px', color:C.muted, textTransform:'uppercase', marginBottom:'2px' }}>Data</div>
@@ -1360,6 +1387,7 @@ function TabNotasPDF({ user }) {
                   </div>
                   <button onClick={()=>removeItem(i)} style={{ background:'none', border:'none', color:C.red, fontSize:'18px', cursor:'pointer', padding:'6px' }}>×</button>
                 </div>
+                )}
               </div>
             ))}
           </div>
