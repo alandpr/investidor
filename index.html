@@ -1253,15 +1253,21 @@ async function parseNotaPDF(file, senha) {
 
   // Resultado
   let resultado = 0;
-  if (isRico) {
-    // Rico: extrai "Ajuste day trade" (resultado bruto do DT antes de taxas)
-    const m = text.match(/Ajuste\s+day\s+trade\s+(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])/i);
+  // Tenta padrões específicos por ordem de prioridade
+  const tryPatterns = [
+    /Total\s*l[ií]quido\s*da\s*nota\s*(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])/i,
+    /Ajuste\s*day\s*trade\s*(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])/i,
+    /Total\s*l[ií]quido\s*\(\d+\)\s*(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])/i,
+  ];
+  for (const pat of tryPatterns) {
+    const m = text.match(pat);
     if (m) {
       const val = parseFloat(m[1].replace(/\./g,'').replace(',','.'));
       resultado = m[2]==='D' ? -val : val;
+      break;
     }
   }
-  // Fallback para ambas: último valor D/C do documento (Total líquido da nota)
+  // Último recurso: último valor D/C (pode ser impreciso)
   if (resultado===0) {
     const valueMatches = [...text.matchAll(/(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])\b/g)];
     if (valueMatches.length) {
@@ -1413,7 +1419,7 @@ function TabResumoDT({ user }) {
 
   useEffect(() => {
     return db.collection('usuarios').doc(user.uid).collection('daytrade_pregoes')
-      .onSnapshot(snap=>{ setPregoes(snap.docs.map(d=>d.data())); setLoading(false); }, ()=>setLoading(false));
+      .onSnapshot(snap=>{ setPregoes(snap.docs.map(d=>({id:d.id,...d.data()}))); setLoading(false); }, ()=>setLoading(false));
   }, [user.uid]);
 
   const meses = {};
@@ -1456,9 +1462,12 @@ function TabResumoDT({ user }) {
             {open && (
               <div style={{ borderTop:`1px solid ${C.border}` }}>
                 {dias.map((d,i)=>(
-                  <div key={i} style={{ padding:'8px 16px', display:'flex', justifyContent:'space-between', fontSize:'12px', borderBottom:`1px solid ${C.border}`, color:C.muted }}>
+                  <div key={i} style={{ padding:'8px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:'12px', borderBottom:`1px solid ${C.border}`, color:C.muted }}>
                     <span className="num">{d.data} · {d.codigo}</span>
-                    <span className="num" style={{ color:(d.resultado||0)>=0?C.green:C.red }}>{fmt(d.resultado||0)}</span>
+                    <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+                      <span className="num" style={{ color:(d.resultado||0)>=0?C.green:C.red }}>{fmt(d.resultado||0)}</span>
+                      <button onClick={()=>{ if(window.confirm('Apagar este pregão?')) db.collection('usuarios').doc(user.uid).collection('daytrade_pregoes').doc(d.id).delete(); }} style={{ background:'none', border:'none', color:C.red, fontSize:'16px', cursor:'pointer', padding:'0 2px', lineHeight:1 }}>×</button>
+                    </div>
                   </div>
                 ))}
                 <div style={{ background:C.surface2, padding:'12px 16px' }}>
