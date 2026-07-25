@@ -1218,7 +1218,6 @@ async function parseNotaPDF(file) {
     const items = content.items
       .map(it => ({ str: it.str, x: it.transform[4], y: it.transform[5] }))
       .filter(it => it.str.trim().length>0);
-    // reconstrói a ordem de leitura (linhas de cima p/ baixo, dentro da linha esquerda p/ direita)
     const lines = [];
     items.forEach(it => {
       let line = lines.find(l => Math.abs(l.y - it.y) < 3);
@@ -1231,19 +1230,50 @@ async function parseNotaPDF(file) {
       text += line.items.map(it=>it.str).join(' ') + ' ';
     });
   }
-  const dateMatch = text.match(/(\d{2}\/\d{2}\/\d{4})/);
-  const codeMatch = text.match(/\b(WIN|WDO|IND|DOL|WSP|BIT)\s?[A-Z]\d{2}\b/);
-  const valueMatches = [...text.matchAll(/(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])\b/g)];
-  let resultado = 0;
-  if (valueMatches.length) {
-    const last = valueMatches[valueMatches.length-1];
-    const val = parseFloat(last[1].replace(/\./g,'').replace(',','.'));
-    resultado = last[2]==='D' ? -val : val;
+
+  // Detecta corretora
+  const isRico = /RICO CORRETORA|NOTA DE NEGOCIAÇÃO/i.test(text);
+  const corretora = isRico ? 'Rico' : 'Genial';
+
+  // Data pregão
+  let dataPregao = '';
+  if (isRico) {
+    const m = text.match(/Data\s*[Pp]reg[ãa]o\s+(\d{2}\/\d{2}\/\d{4})/);
+    if (m) dataPregao = m[1];
   }
+  if (!dataPregao) {
+    const m = text.match(/(\d{2}\/\d{2}\/\d{4})/);
+    if (m) dataPregao = m[1];
+  }
+
+  // Código do ativo
+  const codeMatch = text.match(/\b(WIN|WDO|IND|DOL|WSP|BIT)\s?[A-Z]\d{2}\b/);
+
+  // Resultado
+  let resultado = 0;
+  if (isRico) {
+    // Rico: extrai "Ajuste day trade" (resultado bruto do DT antes de taxas)
+    const m = text.match(/Ajuste\s+day\s+trade\s+(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])/i);
+    if (m) {
+      const val = parseFloat(m[1].replace(/\./g,'').replace(',','.'));
+      resultado = m[2]==='D' ? -val : val;
+    }
+  }
+  // Fallback para ambas: último valor D/C do documento (Total líquido da nota)
+  if (resultado===0) {
+    const valueMatches = [...text.matchAll(/(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])\b/g)];
+    if (valueMatches.length) {
+      const last = valueMatches[valueMatches.length-1];
+      const val = parseFloat(last[1].replace(/\./g,'').replace(',','.'));
+      resultado = last[2]==='D' ? -val : val;
+    }
+  }
+
   return {
-    data: dateMatch ? dateMatch[1] : '',
+    data: dataPregao,
     codigo: codeMatch ? codeMatch[0].replace(/\s+/g,' ') : '',
     resultado,
+    corretora,
   };
 }
 
@@ -1299,7 +1329,7 @@ function TabNotasPDF({ user }) {
         <input type="file" accept="application/pdf" multiple style={{ display:'none' }} onChange={e=>e.target.files?.length && handleFiles(Array.from(e.target.files))} />
         <div style={{ fontSize:'36px', marginBottom:'12px' }}>📄</div>
         <div style={{ fontSize:'14px', fontWeight:500, marginBottom:'4px' }}>Toque para selecionar 1 ou mais PDFs</div>
-        <div style={{ fontSize:'12px', color:C.muted }}>Notas de corretagem com operações de day trade (Mini Índice)</div>
+        <div style={{ fontSize:'12px', color:C.muted }}>Notas de day trade (Mini Índice) · Genial ou Rico</div>
       </label>
 
       {lendo && <div style={{ textAlign:'center', color:C.muted, fontSize:'13px', marginBottom:'12px' }}>Lendo arquivos...</div>}
@@ -1311,7 +1341,10 @@ function TabNotasPDF({ user }) {
           <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'16px' }}>
             {itens.map((it,i)=>(
               <div key={i} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:'10px', padding:'12px' }}>
-                <div style={{ fontSize:'11px', color:C.muted, marginBottom:'8px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{it.nome}</div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+                  <div style={{ fontSize:'11px', color:C.muted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>{it.nome}</div>
+                  {it.corretora && <span style={{ fontSize:'10px', fontWeight:600, background:it.corretora==='Rico'?'rgba(255,102,0,0.15)':'rgba(217,168,92,0.15)', color:it.corretora==='Rico'?'#FF6600':C.gold, borderRadius:'4px', padding:'2px 6px', marginLeft:'8px', flexShrink:0 }}>{it.corretora}</span>}
+                </div>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr auto', gap:'6px', alignItems:'end' }}>
                   <div>
                     <div style={{ fontSize:'10px', color:C.muted, textTransform:'uppercase', marginBottom:'2px' }}>Data</div>
@@ -1338,7 +1371,7 @@ function TabNotasPDF({ user }) {
       {saved && <div style={{ display:'flex', alignItems:'center', gap:'8px', color:C.green, fontSize:'13px', justifyContent:'center', padding:'12px' }}><IcoCheck/> Pregões salvos com sucesso</div>}
 
       <div style={{ fontSize:'11px', color:C.muted, marginTop:'8px', lineHeight:'1.5' }}>
-        O app procura na nota o "Total líquido da nota" e a data do pregão. Confira sempre os valores antes de salvar — o layout pode variar entre corretoras.
+        Detecta automaticamente Genial e Rico. Para Rico extrai o "Ajuste day trade"; para Genial, o "Total líquido da nota". Confira sempre antes de salvar.
       </div>
     </div>
   );
