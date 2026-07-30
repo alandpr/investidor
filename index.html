@@ -1253,22 +1253,55 @@ async function parseNotaPDF(file, senha) {
 
   // Resultado
   let resultado = 0;
-  // Tenta padrões específicos por ordem de prioridade
-  const tryPatterns = [
-    /Total\s*l[ií]quido\s*da\s*nota\s*(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])/i,
-    /Ajuste\s*day\s*trade\s*(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])/i,
-    /Total\s*l[ií]quido\s*\(\d+\)\s*(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])/i,
-  ];
-  for (const pat of tryPatterns) {
-    const m = text.match(pat);
-    if (m) {
-      const val = parseFloat(m[1].replace(/\./g,'').replace(',','.'));
-      resultado = m[2]==='D' ? -val : val;
-      break;
+
+  if (isRico) {
+    // Método 1 (Rico): calcula diretamente dos preços da tabela de operações
+    // Formato: "C WIN Q26 12/08/2026 1 177.465,00 DAY TRADE ..."
+    const opRegex = /([CV])\s+(WIN|WDO|IND|DOL|WSP|BIT)\s+[A-Z]\d{2}\s+[\d\/]+\s+(\d+)\s+([\d.]+,\d{2})\s+DAY/gi;
+    const ops = [...text.matchAll(opRegex)];
+    if (ops.length >= 2) {
+      let compra = 0, venda = 0;
+      for (const op of ops) {
+        const cv = op[1].toUpperCase();
+        const qty = parseInt(op[3]);
+        const price = parseFloat(op[4].replace(/\./g,'').replace(',','.'));
+        if (cv === 'C') compra += qty * price;
+        else venda += qty * price;
+      }
+      if (compra > 0 && venda > 0) {
+        const isWIN = /\bWIN\b/i.test(text);
+        const mult = isWIN ? 0.20 : 10.0;
+        const bruto = (venda - compra) * mult;
+        // Subtrai taxas operacionais (emolumentos, registro, etc.) para ficar igual à Genial
+        // Busca "Total de custos operacionais" ou usa fallback de 0
+        const norm = text.replace(/\s+/g,' ');
+        const custosM = norm.match(/Total\s*de\s*custos\s*operacionais\s*([\d.]+,\d{2})\s*([DC])/i);
+        const custos = custosM ? parseFloat(custosM[1].replace(/\./g,'').replace(',','.')) * (custosM[2]==='D'?-1:1) : 0;
+        resultado = Math.round((bruto + custos) * 100) / 100;
+      }
     }
   }
-  // Último recurso: último valor D/C (pode ser impreciso)
-  if (resultado===0) {
+
+  // Método 2: busca labels específicos no resumo (aplica texto normalizado)
+  if (resultado === 0) {
+    const norm = text.replace(/\s+/g,' ');
+    const summaryPatterns = [
+      /Total\s*l[ií]quido\s*da\s*nota\s*([\d.]+,\d{2})\s*([DC])/i,
+      /Ajuste\s*day\s*trade\s*([\d.]+,\d{2})\s*([DC])/i,
+      /Total\s*l[ií]quido\s*\(\d+\)\s*([\d.]+,\d{2})\s*([DC])/i,
+    ];
+    for (const pat of summaryPatterns) {
+      const m = norm.match(pat);
+      if (m) {
+        const val = parseFloat(m[1].replace(/\./g,'').replace(',','.'));
+        resultado = m[2]==='D' ? -val : val;
+        break;
+      }
+    }
+  }
+
+  // Método 3: último valor D/C do documento (fallback genérico)
+  if (resultado === 0) {
     const valueMatches = [...text.matchAll(/(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])\b/g)];
     if (valueMatches.length) {
       const last = valueMatches[valueMatches.length-1];
