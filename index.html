@@ -1313,6 +1313,8 @@ async function parseNotaPDF(file, senha) {
     }
   }
 
+  window._lastPdfText = text; // debug
+
   return {
     data: dataPregao,
     codigo: codeMatch ? codeMatch[0].replace(/\s+/g,' ') : '',
@@ -1443,6 +1445,9 @@ function TabNotasPDF({ user }) {
       <div style={{ fontSize:'11px', color:C.muted, marginTop:'8px', lineHeight:'1.5' }}>
         Detecta automaticamente Genial e Rico. Para Rico extrai o "Ajuste day trade"; para Genial, o "Total líquido da nota". Confira sempre antes de salvar.
       </div>
+      <button onClick={()=>{ const t=window._lastPdfText||'(vazio)'; const w=window.open('about:blank'); if(w) w.document.write('<pre style="font-size:11px;white-space:pre-wrap;word-break:break-all">'+t.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</pre>'); }} style={{ marginTop:'8px', background:'none', border:`1px solid ${C.border}`, color:C.muted, borderRadius:'8px', padding:'8px 12px', fontSize:'11px', cursor:'pointer', width:'100%' }}>
+        🔍 Ver texto bruto extraído (debug)
+      </button>
     </div>
   );
 }
