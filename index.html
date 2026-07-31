@@ -1255,30 +1255,32 @@ async function parseNotaPDF(file, senha) {
   let resultado = 0;
 
   if (isRico) {
-    // Método 1 (Rico): calcula dos preços da tabela + busca total líquido da nota
+    // Método 1 (Rico): calcula bruto das operações + busca valor líquido no resumo
     const opRegex = /([CV])\s+(WIN|WDO|IND|DOL|WSP|BIT)\s+[A-Z]\d{2}\s+[\d\/]+\s+(\d+)\s+([\d.]+,\d{2})\s+DAY/gi;
     const ops = [...text.matchAll(opRegex)];
-    const norm = text.replace(/\s+/g,' ');
     if (ops.length >= 2) {
-      // Tenta pegar o Total líquido da nota (já inclui taxas, igual à Genial)
-      const liqM = norm.match(/Total\s*l[ií]quido\s*da\s*nota\s*([\d.]+,\d{2})\s*([DC])/i)
-                || norm.match(/Total\s*l[ií]quido\s*\(\d*\)\s*([\d.]+,\d{2})\s*([DC])/i)
-                || norm.match(/Total\s*Conta\s*Normal\s*([\d.]+,\d{2})\s*([DC])/i);
+      let compra = 0, venda = 0;
+      for (const op of ops) {
+        const cv = op[1].toUpperCase();
+        const qty = parseInt(op[3]);
+        const price = parseFloat(op[4].replace(/\./g,'').replace(',','.'));
+        if (cv === 'C') compra += qty * price;
+        else venda += qty * price;
+      }
+      const mult = /\bWIN\b/i.test(text) ? 0.20 : 10.0;
+      const bruto = Math.round((venda - compra) * mult * 100) / 100;
+      const sinal = bruto >= 0 ? 1 : -1;
+
+      // Busca magnitude do total líquido sem exigir D/C (que pode estar em posição inesperada no PDF)
+      const norm = text.replace(/\s+/g,' ');
+      const liqM = norm.match(/Total\s+l[ií]quido\s+da\s+nota\s+([\d.]+,\d{2})/i)
+                || norm.match(/Total\s+Conta\s+Normal\s+([\d.]+,\d{2})/i)
+                || norm.match(/Total\s+l[ií]quido\s+\(\d*\)\s+([\d.]+,\d{2})/i);
       if (liqM) {
         const val = parseFloat(liqM[1].replace(/\./g,'').replace(',','.'));
-        resultado = liqM[2]==='D' ? -val : val;
+        resultado = sinal * val;
       } else {
-        // Fallback: só o bruto das operações
-        let compra = 0, venda = 0;
-        for (const op of ops) {
-          const cv = op[1].toUpperCase();
-          const qty = parseInt(op[3]);
-          const price = parseFloat(op[4].replace(/\./g,'').replace(',','.'));
-          if (cv === 'C') compra += qty * price;
-          else venda += qty * price;
-        }
-        const mult = /\bWIN\b/i.test(text) ? 0.20 : 10.0;
-        resultado = Math.round((venda - compra) * mult * 100) / 100;
+        resultado = bruto;
       }
     }
   }
