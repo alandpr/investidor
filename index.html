@@ -1255,7 +1255,8 @@ async function parseNotaPDF(file, senha) {
   let resultado = 0;
 
   if (isRico) {
-    // Método 1 (Rico): calcula bruto das operações + busca valor líquido no resumo
+    // Rico: operações usam "294,80 D" (sem pipe); resumo financeiro usa "3,50 | D" (com pipe)
+    // Step 1: calcula bruto das operações
     const opRegex = /([CV])\s+(WIN|WDO|IND|DOL|WSP|BIT)\s+[A-Z]\d{2}\s+[\d\/]+\s+(\d+)\s+([\d.]+,\d{2})\s+DAY/gi;
     const ops = [...text.matchAll(opRegex)];
     if (ops.length >= 2) {
@@ -1271,17 +1272,16 @@ async function parseNotaPDF(file, senha) {
       const bruto = Math.round((venda - compra) * mult * 100) / 100;
       const sinal = bruto >= 0 ? 1 : -1;
 
-      // Busca magnitude do total líquido sem exigir D/C (que pode estar em posição inesperada no PDF)
-      const norm = text.replace(/\s+/g,' ');
-      const liqM = norm.match(/Total\s+l[ií]quido\s+da\s+nota\s+([\d.]+,\d{2})/i)
-                || norm.match(/Total\s+Conta\s+Normal\s+([\d.]+,\d{2})/i)
-                || norm.match(/Total\s+l[ií]quido\s+\(\d*\)\s+([\d.]+,\d{2})/i);
-      if (liqM) {
-        const val = parseFloat(liqM[1].replace(/\./g,'').replace(',','.'));
-        resultado = sinal * val;
-      } else {
-        resultado = bruto;
+      // Step 2: acha o total líquido pelo padrão "valor | D/C" exclusivo do resumo Rico
+      // (operações usam "valor D/C" sem pipe, então este padrão só casa com o resumo)
+      const pipeMatches = [...text.matchAll(/([\d.]+,\d{2})\s*\|\s*([DC])/g)];
+      let netVal = 0, netDC = 'D';
+      // percorre de trás pra frente, pega o último não-zero (Total líquido da nota)
+      for (let i = pipeMatches.length - 1; i >= 0; i--) {
+        const v = parseFloat(pipeMatches[i][1].replace(/\./g,'').replace(',','.'));
+        if (v > 0) { netVal = v; netDC = pipeMatches[i][2]; break; }
       }
+      resultado = netVal > 0 ? (netDC === 'D' ? -netVal : netVal) : bruto;
     }
   }
 
